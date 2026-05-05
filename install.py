@@ -115,7 +115,14 @@ def handle_mind_sync(project_dir: Path, project_name: str) -> tuple[bool, bool]:
         console.print("  [yellow]mind CLI not found on PATH.[/yellow]")
         console.print("  Install it: [dim]pip install project-mind[/dim]")
 
-    answer = console.input("  Enable mind-sync integration? [y/N] ").strip().lower()
+    try:
+        if not sys.stdin.isatty():
+            tty = open("/dev/tty")
+            sys.stdin = tty
+        answer = console.input("  Enable mind-sync integration? [y/N] ").strip().lower()
+    except (EOFError, OSError):
+        console.print("[dim]  (non-interactive — skipping mind-sync)[/dim]")
+        answer = ""
     enabled = answer in ("y", "yes")
 
     set_mind_sync_flag(project_dir, enabled)
