@@ -1,0 +1,80 @@
+# IMP Pipeline Configuration
+# Edit these values to customize the runner's behavior.
+# Changes take effect on the next imp.sh invocation.
+
+# ---------------------------------------------------------------------------
+# Per-step model and effort
+# ---------------------------------------------------------------------------
+# Each pipeline step can use a different model + effort level.
+# Effort levels: low (fast/cheap), medium (balanced), high (deeper reasoning)
+#
+# Available models: claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5-20251001
+#
+# spec   — generates story spec from PRD/epics/architecture. Document work.
+# dev    — implements the story. Writes actual code.
+# review — adversarial code review. Quality gate.
+
+model_spec: claude-sonnet-4-6
+effort_spec: high
+
+model_dev: claude-sonnet-4-6
+effort_dev: high
+
+model_review: claude-sonnet-4-6
+effort_review: high
+
+# ---------------------------------------------------------------------------
+# Review gate
+# ---------------------------------------------------------------------------
+# Maximum number of times code review can fail before a story is blocked.
+# Set to 0 for infinite retries. Recommended: 3 for most projects.
+max_review_attempts: 3
+
+# ---------------------------------------------------------------------------
+# Display
+# ---------------------------------------------------------------------------
+# Automatically show agent output panel when each step starts (toggle with [l])
+output_on_step_start: true
+
+# ---------------------------------------------------------------------------
+# Paths (relative to project root)
+# ---------------------------------------------------------------------------
+mind_file: _mind/mind.md
+sprint_status: _bmad-output/implementation-artifacts/sprint-status.yaml
+artifacts_dir: _bmad-output/implementation-artifacts
+
+# ---------------------------------------------------------------------------
+# Usage budget strategy
+# ---------------------------------------------------------------------------
+# base_limit_pct  — pause/quit when 5h rolling usage hits this % (0 = off).
+# limit_7d_pct    — pause/quit when 7d cumulative usage hits this % (0 = off).
+# extra_limit_eur — hard stop when extra credit spend reaches this € (0 = off).
+# on_base_limit   — action when base/7d cap is hit: "pause" or "quit".
+# on_extra_limit  — action when extra € cap is hit: "pause" or "quit".
+
+base_limit_pct: 0
+limit_7d_pct: 0
+extra_limit_eur: 50.00
+on_base_limit: pause
+on_extra_limit: pause
+
+# ---------------------------------------------------------------------------
+# Planned pause points
+# ---------------------------------------------------------------------------
+# pause_after         - pause after these story IDs complete (reload live with r).
+# pause_between_epics - pause before starting each new epic for manual QA gates.
+
+pause_after:
+  # - story-id-here
+
+pause_between_epics: false
+
+# ---------------------------------------------------------------------------
+# Mind sync
+# ---------------------------------------------------------------------------
+# mind_sync_after_story — run mind-sync after each story completes (blocking).
+#                         Keeps mind.md current so every spec gets fresh context.
+# mind_sync_model       — model to use for mind-sync.
+
+mind_sync_after_story: false
+mind_sync_model: claude-sonnet-4-6

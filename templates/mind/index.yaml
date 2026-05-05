@@ -1,0 +1,7 @@
+project: {{project_name}}
+last_sync: "{{today}}T00:00:00"
+sync_count: 0
+watch_patterns:
+  - _bmad-output
+transcript_sources: []
+tracked_files: []
