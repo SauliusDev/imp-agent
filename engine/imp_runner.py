@@ -601,7 +601,9 @@ async def _run_spec(
 
     prompt = (
         f"/bmad-create-story {story_id}\n\n"
-        f"## Project Memory (mind.md)\n{mind_section}\n{PREAMBLE_SPEC}"
+        f"## Project Memory (mind.md)\n{mind_section}\n"
+        f"IMPORTANT: The story file MUST be written to exactly this path: `{story_file}`\n"
+        + PREAMBLE_SPEC
     )
 
     imp_ledger.cmd_step_attempt(story_id, "spec")
