@@ -47,8 +47,12 @@ if ! python3 -c "import rich" 2>/dev/null; then
   fi
 fi
 
-# 3. Ledger exists
-if [ ! -f "$SCRIPT_DIR/ledger.json" ]; then
+# 3. Ledger exists (not required for log-sync)
+FIRST_POS_ARG=""
+for _arg in "$@"; do
+  case "$_arg" in -*) ;; *) FIRST_POS_ARG="$_arg"; break ;; esac
+done
+if [ "$FIRST_POS_ARG" != "log-sync" ] && [ ! -f "$SCRIPT_DIR/ledger.json" ]; then
   echo "Error: No ledger found at $SCRIPT_DIR/ledger.json" >&2
   echo "Run /imp-init first." >&2
   exit 1

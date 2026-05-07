@@ -1075,6 +1075,94 @@ def _make_quit_now(state: RunnerState, session: SessionLogger):
     return quit_now
 
 
+async def _cmd_log_sync(model: str) -> None:
+    """Retroactive mind-sync: ingest all completed story logs into mind.md."""
+    skill_path = os.path.join(PROJECT_ROOT, ".claude/skills/mind-sync/workflow.md")
+    if not os.path.isfile(skill_path):
+        print(f"Error: mind-sync skill not found at {skill_path}")
+        sys.exit(1)
+
+    ledger = imp_ledger.read_ledger()
+    if not ledger:
+        print("Error: No ledger found. Run /imp-init first.")
+        sys.exit(1)
+
+    MAX_PER_LOG = 6 * 1024    # 6KB per log file — truncate oldest portion
+    MAX_TOTAL   = 120 * 1024  # 120KB total context budget
+
+    sections: list[str] = []
+    total = 0
+    story_count = 0
+
+    for epic in ledger.get("epics", []):
+        for story in epic.get("stories", []):
+            if story.get("status") != "done":
+                continue
+            story_id = story["id"]
+            story_dir = os.path.join(LOG_DIR, story_id)
+            if not os.path.isdir(story_dir):
+                continue
+
+            story_parts: list[str] = []
+            for step in ("spec", "dev", "review"):
+                log_files = sorted(
+                    f for f in os.listdir(story_dir)
+                    if f.startswith(f"{step}-") and f.endswith(".log")
+                )
+                for fname in log_files:
+                    fpath = os.path.join(story_dir, fname)
+                    try:
+                        content = open(fpath, encoding="utf-8", errors="replace").read()
+                        if len(content) > MAX_PER_LOG:
+                            content = "... [truncated] ...\n" + content[-MAX_PER_LOG:]
+                        story_parts.append(f"#### {fname}\n{content.strip()}")
+                    except OSError:
+                        pass
+
+            if story_parts:
+                section = f"### {story_id}\n" + "\n\n".join(story_parts)
+                sections.append(section)
+                total += len(section)
+                story_count += 1
+                if total >= MAX_TOTAL:
+                    sections.append("... [remaining stories omitted — size limit reached]")
+                    break
+
+        if total >= MAX_TOTAL:
+            break
+
+    if not sections:
+        print("No completed story logs found.")
+        return
+
+    prompt = (
+        "Run mind-sync: follow .claude/skills/mind-sync/workflow.md to update "
+        "_mind/mind.md with learnings from the project.\n\n"
+        "## Historical IMP Logs (catch-up log-sync)\n"
+        "The following completed story logs were recorded before mind-sync was enabled. "
+        "Treat them as the session history and incorporate all patterns, decisions, "
+        "and lessons learned into mind.md.\n\n"
+        + "\n\n".join(sections)
+    )
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    sessions_dir = os.path.join(LOG_DIR, "sessions")
+    os.makedirs(sessions_dir, exist_ok=True)
+    jsonl_path = os.path.join(sessions_dir, f"log-sync-{ts}.jsonl")
+    readable_path = os.path.join(sessions_dir, f"log-sync-{ts}.log")
+
+    print(f"log-sync: {story_count} stories · {total // 1024}KB · model={model}")
+    print(f"output  : {readable_path}")
+
+    claude_args = [
+        "claude", "--print", "--dangerously-skip-permissions",
+        prompt, "--model", model, "--effort", "low",
+    ]
+    state = create_initial_state(config={}, epic_id="log-sync")
+    await run_claude_subprocess(claude_args, jsonl_path, readable_path, state)
+    print("log-sync complete — mind.md updated.")
+
+
 def main() -> None:
     """Entry point — parse args, start threads, run display loop."""
     parser = argparse.ArgumentParser(
@@ -1092,6 +1180,13 @@ def main() -> None:
         help="Enable verbose output",
     )
     args = parser.parse_args()
+
+    # log-sync mode — no TUI, no ledger required
+    if args.epic_id == "log-sync":
+        cfg = imp_ledger.load_config()
+        model = str(cfg.get("mind_sync_model", "claude-sonnet-4-6"))
+        asyncio.run(_cmd_log_sync(model))
+        return
 
     # Load config and verify ledger exists
     config = imp_ledger.CONFIG
