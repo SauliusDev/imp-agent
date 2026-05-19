@@ -91,6 +91,45 @@ def create_mind_dir(project_dir: Path, project_name: str) -> bool:
     return True
 
 
+VSCODE_SETTINGS = """{
+  // _imp/ is written to thousands of times per second while the imp agent runs
+  // (stream-json logs flushed per partial message). VS Code's file watcher does
+  // NOT honor .gitignore, so without these excludes the renderer's FSEvents
+  // backlog grows until the V8 heap hits its ~4GB ceiling and VS Code crashes
+  // (JavaScript heap out of memory). Keep these excludes in place.
+  "files.watcherExclude": {
+    "**/_imp/**": true
+  },
+  "search.exclude": {
+    "**/_imp": true
+  },
+  "files.exclude": {
+    "**/_imp/logs": true
+  }
+}
+"""
+
+
+def install_vscode_excludes(project_dir: Path) -> str:
+    """Write .vscode/settings.json excluding _imp/ from the VS Code watcher.
+
+    Without this, the high-frequency log writes under _imp/ flood VS Code's
+    file watcher and crash it with a JavaScript-heap OOM. Returns one of:
+    "created", "preserved" (already has _imp exclude or a settings file we
+    won't risk clobbering).
+    """
+    vscode_dir = project_dir / ".vscode"
+    settings = vscode_dir / "settings.json"
+    if settings.exists():
+        # Never clobber an existing (possibly JSONC) settings file.
+        if "_imp" in settings.read_text():
+            return "preserved"
+        return "manual"
+    vscode_dir.mkdir(exist_ok=True)
+    settings.write_text(VSCODE_SETTINGS)
+    return "created"
+
+
 def check_project_markers(project_dir: Path) -> None:
     if not any((project_dir / m).exists() for m in PROJECT_MARKERS):
         console.print("[yellow]  ⚠  No package.json / pyproject.toml / go.mod detected.[/yellow]")
@@ -138,6 +177,7 @@ def print_summary(
     config_created: bool,
     mind_enabled: bool,
     mind_dir_created: bool,
+    vscode_status: str,
 ) -> None:
     console.print()
     action = "updated" if was_update else "installed"
@@ -166,6 +206,13 @@ def print_summary(
         table.add_row("Mind sync", "enabled", mind_note)
     else:
         table.add_row("Mind sync", "disabled", "")
+
+    vscode_notes = {
+        "created": "created — prevents VS Code OOM crash",
+        "preserved": "_imp exclude already present",
+        "manual": "[yellow]exists — add **/_imp/** to files.watcherExclude[/yellow]",
+    }
+    table.add_row("VS Code", ".vscode/settings.json", vscode_notes[vscode_status])
 
     console.print(table)
     console.print()
@@ -200,9 +247,13 @@ def main() -> None:
     engine_count, was_update = install_engine(project_dir)
     install_skills(project_dir)
     config_created = install_config(project_dir)
+    vscode_status = install_vscode_excludes(project_dir)
     mind_enabled, mind_dir_created = handle_mind_sync(project_dir, project_name)
 
-    print_summary(project_name, engine_count, was_update, config_created, mind_enabled, mind_dir_created)
+    print_summary(
+        project_name, engine_count, was_update, config_created,
+        mind_enabled, mind_dir_created, vscode_status,
+    )
 
 
 if __name__ == "__main__":
