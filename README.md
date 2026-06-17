@@ -4,6 +4,8 @@ Autonomous BMAD pipeline orchestrator. Drives `/bmad-create-story`, `/bmad-dev-s
 and `/bmad-code-review` in a loop over sprint stories — with a Rich TUI, persistent ledger,
 usage gates, and optional mind-sync.
 
+![IMP Agent terminal demo](demo.png)
+
 ## Install
 
 Run from your project root (BMAD must already be set up):
