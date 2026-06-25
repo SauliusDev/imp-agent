@@ -83,7 +83,6 @@ def _build_header(state: RunnerState) -> Panel:
     effort_dev = cfg.get("effort_dev", "?")
     effort_review = cfg.get("effort_review", "?")
     max_rev = cfg.get("max_review_attempts", "?")
-    mind = cfg.get("mind_file", "?")
     artifacts = cfg.get("artifacts_dir", "?")
 
     usage_5h = _fmt_usage(state.usage_5h, stale=stale)
@@ -116,8 +115,7 @@ def _build_header(state: RunnerState) -> Panel:
     t.append(f"dev: {model_dev} / {effort_dev}\n", style="white")
     t.append(f"review: {model_review} / {effort_review}".ljust(C), style="white")
     t.append(f"max: {max_rev}\n", style="white")
-    t.append(f"  mind: {mind}".ljust(C), style="bright_black")
-    t.append(f"artifacts: {artifacts}\n", style="bright_black")
+    t.append(f"  artifacts: {artifacts}\n", style="bright_black")
     t.append("\n")
 
     # Single usage line: session + all percentages + extra + resets + badges

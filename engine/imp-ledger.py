@@ -56,7 +56,6 @@ def load_config():
         "model_review": "claude-opus-4-6",
         "effort_review": "high",
         "max_review_attempts": "3",
-        "mind_file": "_mind/mind.md",
         "sprint_status": "_bmad-output/implementation-artifacts/sprint-status.yaml",
         "artifacts_dir": "_bmad-output/implementation-artifacts",
     }
@@ -286,7 +285,6 @@ def cmd_init(sprint_status_path):
             "model_review": CONFIG["model_review"],
             "effort_review": CONFIG["effort_review"],
             "max_review_attempts": int(CONFIG["max_review_attempts"]),
-            "mind_file": CONFIG["mind_file"],
             "artifacts_dir": CONFIG["artifacts_dir"],
         },
         "epics": epics,

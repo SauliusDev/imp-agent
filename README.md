@@ -2,7 +2,7 @@
 
 Autonomous BMAD pipeline orchestrator. Drives `/bmad-create-story`, `/bmad-dev-story`,
 and `/bmad-code-review` in a loop over sprint stories — with a Rich TUI, persistent ledger,
-usage gates, and optional mind-sync.
+and usage gates.
 
 ![IMP Agent terminal demo](demo.png)
 
@@ -27,9 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/SauliusDev/imp-agent/main/setup.sh 
 |---|---|
 | `_imp/` | IMP engine (7 Python files + launcher) |
 | `.claude/skills/imp-init/` | Skill to initialize the ledger |
-| `.claude/skills/mind-sync/` | Skill to sync project memory (optional) |
 | `_imp/config.yaml` | Pipeline config — edit before first run |
-| `_mind/` | Project memory directory (only if mind-sync enabled) |
 
 ## After installing
 
@@ -41,15 +39,6 @@ curl -fsSL https://raw.githubusercontent.com/SauliusDev/imp-agent/main/setup.sh 
 ## Re-installing / updating
 
 Re-run the same curl command. Engine files are always overwritten; your `_imp/config.yaml` is preserved.
-
-## Mind-sync (optional)
-
-IMP can sync project memory after each story using [mind](https://github.com/SauliusDev/mind).
-The installer asks about this interactively. To toggle later, edit `_imp/config.yaml`:
-
-```yaml
-mind_sync_after_story: true   # or false
-```
 
 ## Usage
 

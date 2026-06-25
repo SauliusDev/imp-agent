@@ -585,7 +585,7 @@ def _build_claude_args(prompt: str, model: str, effort: str) -> list[str]:
 
 async def _run_spec(
     state: RunnerState, session: SessionLogger, story_id: str,
-    story_file: str, model: str, effort: str, mind_file: str,
+    story_file: str, model: str, effort: str,
 ) -> None:
     """Run the spec step for a story."""
     if os.path.isfile(os.path.join(PROJECT_ROOT, story_file)):
@@ -593,15 +593,8 @@ async def _run_spec(
         imp_ledger.cmd_step_done(story_id, "spec")
         return
 
-    mind_section = ""
-    mind_path = os.path.join(PROJECT_ROOT, mind_file)
-    if os.path.isfile(mind_path):
-        with open(mind_path, encoding="utf-8") as f:
-            mind_section = f.read()
-
     prompt = (
         f"/bmad-create-story {story_id}\n\n"
-        f"## Project Memory (mind.md)\n{mind_section}\n"
         f"IMPORTANT: The story file MUST be written to exactly this path: `{story_file}`\n"
         + PREAMBLE_SPEC
     )
@@ -745,34 +738,6 @@ async def _run_review(
             f"— sending back to dev"
         )
         imp_ledger.cmd_set_step(story_id, "dev")
-
-
-async def _run_mind_sync(
-    state: RunnerState, session: SessionLogger, story_id: str, model: str,
-) -> None:
-    """Run mind-sync after a story completes. Blocking — next spec gets fresh mind."""
-    skill_path = os.path.join(PROJECT_ROOT, ".claude/skills/mind-sync/workflow.md")
-    if not os.path.isfile(skill_path):
-        session.log(f"{story_id}/mind-sync: skill not found at {skill_path} — skipping")
-        return
-
-    prompt = (
-        "Run mind-sync: follow .claude/skills/mind-sync/workflow.md to update "
-        "_mind/mind.md with what just happened in the project."
-    )
-    args = ["claude", "--print", "--dangerously-skip-permissions",
-            prompt, "--model", model, "--effort", "low"]
-
-    jsonl_path, readable_path = _build_log_paths(story_id, "mind-sync", 1)
-    session.log(f"{story_id}/mind-sync: starting with {model}")
-
-    start = time.time()
-    _begin_step(state, story_id, "mind-sync", 1, 0)
-    await run_claude_subprocess(args, jsonl_path, readable_path, state)
-    state.clear_current()
-    elapsed = time.time() - start
-
-    session.log(f"{story_id}/mind-sync: done in {elapsed:.0f}s")
 
 
 # -- Between-step checks --
@@ -989,9 +954,6 @@ async def pipeline_main(state: RunnerState, session: SessionLogger) -> None:
         model_review = str(cfg.get("model_review", "claude-opus-4-6"))
         effort_review = str(cfg.get("effort_review", "high"))
         max_review = int(cfg.get("max_review_attempts", 3))
-        mind_file = str(cfg.get("mind_file", "_mind/mind.md"))
-        mind_sync_after_story = str(cfg.get("mind_sync_after_story", "false")).lower() in ("true", "1", "yes")
-        mind_sync_model = str(cfg.get("mind_sync_model", "claude-sonnet-4-6"))
         artifacts_dir = str(cfg.get("artifacts_dir", "_bmad-output/implementation-artifacts"))
 
         story_file = f"{artifacts_dir}/{story_id}.md"
@@ -1000,7 +962,7 @@ async def pipeline_main(state: RunnerState, session: SessionLogger) -> None:
         if step == "spec":
             await _run_spec(
                 state, session, story_id, story_file,
-                model_spec, effort_spec, mind_file,
+                model_spec, effort_spec,
             )
 
         elif step == "dev":
@@ -1017,8 +979,6 @@ async def pipeline_main(state: RunnerState, session: SessionLogger) -> None:
             # If story is fully done (removed from pending), flag for pause_after check
             if story_id not in state.pending_stories:
                 state.last_completed_story_id = story_id
-                if mind_sync_after_story and not state.should_exit:
-                    await _run_mind_sync(state, session, story_id, mind_sync_model)
 
         elif step == "":
             # current_step is null — story should already be done
@@ -1075,94 +1035,6 @@ def _make_quit_now(state: RunnerState, session: SessionLogger):
     return quit_now
 
 
-async def _cmd_log_sync(model: str) -> None:
-    """Retroactive mind-sync: ingest all completed story logs into mind.md."""
-    skill_path = os.path.join(PROJECT_ROOT, ".claude/skills/mind-sync/workflow.md")
-    if not os.path.isfile(skill_path):
-        print(f"Error: mind-sync skill not found at {skill_path}")
-        sys.exit(1)
-
-    ledger = imp_ledger.read_ledger()
-    if not ledger:
-        print("Error: No ledger found. Run /imp-init first.")
-        sys.exit(1)
-
-    MAX_PER_LOG = 6 * 1024    # 6KB per log file — truncate oldest portion
-    MAX_TOTAL   = 120 * 1024  # 120KB total context budget
-
-    sections: list[str] = []
-    total = 0
-    story_count = 0
-
-    for epic in ledger.get("epics", []):
-        for story in epic.get("stories", []):
-            if story.get("status") != "done":
-                continue
-            story_id = story["id"]
-            story_dir = os.path.join(LOG_DIR, story_id)
-            if not os.path.isdir(story_dir):
-                continue
-
-            story_parts: list[str] = []
-            for step in ("spec", "dev", "review"):
-                log_files = sorted(
-                    f for f in os.listdir(story_dir)
-                    if f.startswith(f"{step}-") and f.endswith(".log")
-                )
-                for fname in log_files:
-                    fpath = os.path.join(story_dir, fname)
-                    try:
-                        content = open(fpath, encoding="utf-8", errors="replace").read()
-                        if len(content) > MAX_PER_LOG:
-                            content = "... [truncated] ...\n" + content[-MAX_PER_LOG:]
-                        story_parts.append(f"#### {fname}\n{content.strip()}")
-                    except OSError:
-                        pass
-
-            if story_parts:
-                section = f"### {story_id}\n" + "\n\n".join(story_parts)
-                sections.append(section)
-                total += len(section)
-                story_count += 1
-                if total >= MAX_TOTAL:
-                    sections.append("... [remaining stories omitted — size limit reached]")
-                    break
-
-        if total >= MAX_TOTAL:
-            break
-
-    if not sections:
-        print("No completed story logs found.")
-        return
-
-    prompt = (
-        "Run mind-sync: follow .claude/skills/mind-sync/workflow.md to update "
-        "_mind/mind.md with learnings from the project.\n\n"
-        "## Historical IMP Logs (catch-up log-sync)\n"
-        "The following completed story logs were recorded before mind-sync was enabled. "
-        "Treat them as the session history and incorporate all patterns, decisions, "
-        "and lessons learned into mind.md.\n\n"
-        + "\n\n".join(sections)
-    )
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    sessions_dir = os.path.join(LOG_DIR, "sessions")
-    os.makedirs(sessions_dir, exist_ok=True)
-    jsonl_path = os.path.join(sessions_dir, f"log-sync-{ts}.jsonl")
-    readable_path = os.path.join(sessions_dir, f"log-sync-{ts}.log")
-
-    print(f"log-sync: {story_count} stories · {total // 1024}KB · model={model}")
-    print(f"output  : {readable_path}")
-
-    claude_args = [
-        "claude", "--print", "--dangerously-skip-permissions",
-        prompt, "--model", model, "--effort", "low",
-    ]
-    state = create_initial_state(config={}, epic_id="log-sync")
-    await run_claude_subprocess(claude_args, jsonl_path, readable_path, state)
-    print("log-sync complete — mind.md updated.")
-
-
 def main() -> None:
     """Entry point — parse args, start threads, run display loop."""
     parser = argparse.ArgumentParser(
@@ -1180,13 +1052,6 @@ def main() -> None:
         help="Enable verbose output",
     )
     args = parser.parse_args()
-
-    # log-sync mode — no TUI, no ledger required
-    if args.epic_id == "log-sync":
-        cfg = imp_ledger.load_config()
-        model = str(cfg.get("mind_sync_model", "claude-sonnet-4-6"))
-        asyncio.run(_cmd_log_sync(model))
-        return
 
     # Load config and verify ledger exists
     config = imp_ledger.CONFIG

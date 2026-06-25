@@ -4,7 +4,6 @@
 import argparse
 import shutil
 import sys
-from datetime import date
 from pathlib import Path
 
 from rich.console import Console
@@ -54,40 +53,6 @@ def install_config(project_dir: Path) -> bool:
     if config_dest.exists():
         return False
     shutil.copy2(SCRIPT_DIR / "templates" / "config.yaml", config_dest)
-    return True
-
-
-def set_mind_sync_flag(project_dir: Path, enabled: bool) -> None:
-    """Update mind_sync_after_story in _imp/config.yaml."""
-    config_path = project_dir / "_imp" / "config.yaml"
-    if not config_path.exists():
-        return
-    content = config_path.read_text()
-    if enabled:
-        content = content.replace("mind_sync_after_story: false", "mind_sync_after_story: true")
-    else:
-        content = content.replace("mind_sync_after_story: true", "mind_sync_after_story: false")
-    config_path.write_text(content)
-
-
-def create_mind_dir(project_dir: Path, project_name: str) -> bool:
-    """Create _mind/ from templates. Returns True if created, False if existed."""
-    mind_dir = project_dir / "_mind"
-    if mind_dir.exists():
-        return False
-
-    mind_dir.mkdir()
-    (mind_dir / "logs").mkdir()
-
-    today = date.today().isoformat()
-    templates_dir = SCRIPT_DIR / "templates" / "mind"
-    for src in sorted(templates_dir.iterdir()):
-        if src.is_file():
-            content = src.read_text()
-            content = content.replace("{{project_name}}", project_name)
-            content = content.replace("{{today}}", today)
-            (mind_dir / src.name).write_text(content)
-
     return True
 
 
@@ -145,38 +110,11 @@ def ensure_claude_dir(project_dir: Path) -> None:
         claude_dir.mkdir(parents=True)
 
 
-def handle_mind_sync(project_dir: Path, project_name: str) -> tuple[bool, bool]:
-    """Interactive mind-sync prompt. Returns (enabled, mind_dir_created)."""
-    mind_available = shutil.which("mind") is not None
-
-    console.print()
-    if not mind_available:
-        console.print("  [yellow]mind CLI not found on PATH.[/yellow]")
-        console.print("  Install it: [dim]pip install project-mind[/dim]")
-
-    try:
-        if not sys.stdin.isatty():
-            tty = open("/dev/tty")
-            sys.stdin = tty
-        answer = console.input("  Enable mind-sync integration? [y/N] ").strip().lower()
-    except (EOFError, OSError):
-        console.print("[dim]  (non-interactive — skipping mind-sync)[/dim]")
-        answer = ""
-    enabled = answer in ("y", "yes")
-
-    set_mind_sync_flag(project_dir, enabled)
-    mind_dir_created = create_mind_dir(project_dir, project_name) if enabled else False
-
-    return enabled, mind_dir_created
-
-
 def print_summary(
     project_name: str,
     engine_count: int,
     was_update: bool,
     config_created: bool,
-    mind_enabled: bool,
-    mind_dir_created: bool,
     vscode_status: str,
 ) -> None:
     console.print()
@@ -194,18 +132,12 @@ def print_summary(
 
     engine_note = f"updated ({engine_count} files overwritten)" if was_update else f"{engine_count} files"
     table.add_row("Engine", "_imp/", engine_note)
-    table.add_row("Skills", ".claude/skills/", "imp-init, mind-sync")
+    table.add_row("Skills", ".claude/skills/", "imp-init")
 
     if config_created:
         table.add_row("Config", "_imp/config.yaml", "created")
     else:
         table.add_row("Config", "_imp/config.yaml", "preserved ← your edits kept")
-
-    if mind_enabled:
-        mind_note = "_mind/ created" if mind_dir_created else "_mind/ already exists"
-        table.add_row("Mind sync", "enabled", mind_note)
-    else:
-        table.add_row("Mind sync", "disabled", "")
 
     vscode_notes = {
         "created": "created — prevents VS Code OOM crash",
@@ -248,11 +180,9 @@ def main() -> None:
     install_skills(project_dir)
     config_created = install_config(project_dir)
     vscode_status = install_vscode_excludes(project_dir)
-    mind_enabled, mind_dir_created = handle_mind_sync(project_dir, project_name)
 
     print_summary(
-        project_name, engine_count, was_update, config_created,
-        mind_enabled, mind_dir_created, vscode_status,
+        project_name, engine_count, was_update, config_created, vscode_status,
     )
 
 

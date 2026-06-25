@@ -39,7 +39,6 @@ output_on_step_start: true
 # ---------------------------------------------------------------------------
 # Paths (relative to project root)
 # ---------------------------------------------------------------------------
-mind_file: _mind/mind.md
 sprint_status: _bmad-output/implementation-artifacts/sprint-status.yaml
 artifacts_dir: _bmad-output/implementation-artifacts
 
@@ -68,13 +67,3 @@ pause_after:
   # - story-id-here
 
 pause_between_epics: false
-
-# ---------------------------------------------------------------------------
-# Mind sync
-# ---------------------------------------------------------------------------
-# mind_sync_after_story — run mind-sync after each story completes (blocking).
-#                         Keeps mind.md current so every spec gets fresh context.
-# mind_sync_model       — model to use for mind-sync.
-
-mind_sync_after_story: false
-mind_sync_model: claude-sonnet-4-6
