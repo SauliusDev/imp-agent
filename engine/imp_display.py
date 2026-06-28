@@ -50,6 +50,10 @@ def _short_model(model: str) -> str:
     return model.replace("claude-", "")
 
 
+def _agent_provider(config: dict) -> str:
+    return str(config.get("agent_provider", "claude")).strip().lower()
+
+
 def _fmt_resets(iso_ts: Optional[str]) -> str:
     """Format an ISO timestamp as a countdown string like '3h48m' or '5d20h'."""
     if not iso_ts:
@@ -84,10 +88,14 @@ def _build_header(state: RunnerState) -> Panel:
     effort_review = cfg.get("effort_review", "?")
     max_rev = cfg.get("max_review_attempts", "?")
     artifacts = cfg.get("artifacts_dir", "?")
+    provider = _agent_provider(cfg)
 
-    usage_5h = _fmt_usage(state.usage_5h, stale=stale)
-    usage_7d = _fmt_usage(state.usage_7d, stale=stale)
-    usage_snt = _fmt_usage(state.usage_sonnet, stale=stale)
+    if provider == "codex":
+        usage_5h = usage_7d = usage_snt = "off"
+    else:
+        usage_5h = _fmt_usage(state.usage_5h, stale=stale)
+        usage_7d = _fmt_usage(state.usage_7d, stale=stale)
+        usage_snt = _fmt_usage(state.usage_sonnet, stale=stale)
 
     # Extra display: "€6.34/€85" or "?" if unknown
     if state.usage_extra_spent is not None:
@@ -111,10 +119,12 @@ def _build_header(state: RunnerState) -> Panel:
 
     t = Text()
     # Config rows — colons align, right column starts at fixed position
+    t.append(f"  provider: {provider}".ljust(C), style="white")
+    t.append(f"max: {max_rev}\n", style="white")
     t.append(f"  spec: {model_spec} / {effort_spec}".ljust(C), style="white")
     t.append(f"dev: {model_dev} / {effort_dev}\n", style="white")
     t.append(f"review: {model_review} / {effort_review}".ljust(C), style="white")
-    t.append(f"max: {max_rev}\n", style="white")
+    t.append("\n", style="white")
     t.append(f"  artifacts: {artifacts}\n", style="bright_black")
     t.append("\n")
 

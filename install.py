@@ -33,10 +33,18 @@ def install_engine(project_dir: Path) -> tuple[int, bool]:
     return count, was_update
 
 
-def install_skills(project_dir: Path) -> None:
-    """Copy skills/ → .claude/skills/ (overwrite)."""
+def skills_dest_for_provider(project_dir: Path, agent_provider: str = "claude") -> Path:
+    """Return the IMP skill destination for the selected agent provider."""
+    provider = agent_provider.strip().lower()
+    if provider == "codex":
+        return project_dir / ".agents" / "skills"
+    return project_dir / ".claude" / "skills"
+
+
+def install_skills(project_dir: Path, agent_provider: str = "claude") -> Path:
+    """Copy skills/ to the provider-specific skills directory. Returns destination."""
     skills_src = SCRIPT_DIR / "skills"
-    skills_dest = project_dir / ".claude" / "skills"
+    skills_dest = skills_dest_for_provider(project_dir, agent_provider)
     skills_dest.mkdir(parents=True, exist_ok=True)
 
     for skill_dir in sorted(skills_src.iterdir()):
@@ -45,6 +53,7 @@ def install_skills(project_dir: Path) -> None:
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.copytree(skill_dir, dest)
+    return skills_dest
 
 
 def install_config(project_dir: Path) -> bool:
@@ -102,7 +111,15 @@ def check_project_markers(project_dir: Path) -> None:
         console.print()
 
 
-def ensure_claude_dir(project_dir: Path) -> None:
+def ensure_agent_dir(project_dir: Path, agent_provider: str) -> None:
+    if agent_provider.strip().lower() == "codex":
+        agents_dir = project_dir / ".agents"
+        if not agents_dir.exists():
+            console.print("[yellow]  ⚠  No .agents/ directory found — creating it[/yellow]")
+            console.print()
+            agents_dir.mkdir(parents=True)
+        return
+
     claude_dir = project_dir / ".claude"
     if not claude_dir.exists():
         console.print("[yellow]  ⚠  No .claude/ directory found — creating it[/yellow]")
@@ -116,6 +133,7 @@ def print_summary(
     was_update: bool,
     config_created: bool,
     vscode_status: str,
+    skills_dest: Path,
 ) -> None:
     console.print()
     action = "updated" if was_update else "installed"
@@ -132,7 +150,11 @@ def print_summary(
 
     engine_note = f"updated ({engine_count} files overwritten)" if was_update else f"{engine_count} files"
     table.add_row("Engine", "_imp/", engine_note)
-    table.add_row("Skills", ".claude/skills/", "imp-init")
+    if skills_dest.is_relative_to(Path.cwd()):
+        skills_label = str(skills_dest.relative_to(Path.cwd()))
+    else:
+        skills_label = str(skills_dest)
+    table.add_row("Skills", skills_label, "imp-init")
 
     if config_created:
         table.add_row("Config", "_imp/config.yaml", "created")
@@ -159,9 +181,16 @@ def print_summary(
 def main() -> None:
     parser = argparse.ArgumentParser(description="IMP Agent installer")
     parser.add_argument("--project-dir", required=True, type=Path)
+    parser.add_argument(
+        "--agent-provider",
+        choices=["claude", "codex"],
+        default="claude",
+        help="Install provider-specific IMP skill target (default: claude)",
+    )
     args = parser.parse_args()
     project_dir = args.project_dir.resolve()
     project_name = project_dir.name
+    agent_provider = args.agent_provider
 
     console.print(Panel.fit("[bold cyan]IMP Agent Installer[/bold cyan]", border_style="cyan"))
     console.print()
@@ -174,15 +203,15 @@ def main() -> None:
         sys.exit(1)
 
     check_project_markers(project_dir)
-    ensure_claude_dir(project_dir)
+    ensure_agent_dir(project_dir, agent_provider)
 
     engine_count, was_update = install_engine(project_dir)
-    install_skills(project_dir)
+    skills_dest = install_skills(project_dir, agent_provider)
     config_created = install_config(project_dir)
     vscode_status = install_vscode_excludes(project_dir)
 
     print_summary(
-        project_name, engine_count, was_update, config_created, vscode_status,
+        project_name, engine_count, was_update, config_created, vscode_status, skills_dest,
     )
 
 

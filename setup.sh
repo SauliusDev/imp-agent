@@ -6,6 +6,7 @@ set -euo pipefail
 
 IMP_REPO="https://github.com/SauliusDev/imp-agent"
 IMP_TMP="/tmp/imp-agent-install"
+IMP_AGENT_PROVIDER="${IMP_AGENT_PROVIDER:-claude}"
 
 # ── 1. Python 3.10+ ──────────────────────────────────────────────────────────
 
@@ -47,11 +48,20 @@ fi
 
 # ── 3. BMAD check ────────────────────────────────────────────────────────────
 
-if [ ! -d ".claude/skills/bmad-dev-story" ]; then
+if [ "$IMP_AGENT_PROVIDER" = "codex" ]; then
+  BMAD_SKILLS_DIR=".agents/skills"
+  BMAD_INSTALL_HINT="npx bmad-method@latest install --tools codex --directory $(pwd)"
+else
+  BMAD_SKILLS_DIR=".claude/skills"
+  BMAD_INSTALL_HINT="npx bmad-method@latest install --tools claude-code --directory $(pwd)"
+fi
+
+if [ ! -d "$BMAD_SKILLS_DIR/bmad-dev-story" ]; then
   echo "" >&2
-  echo "✗ BMAD not found in .claude/skills/" >&2
+  echo "✗ BMAD not found in $BMAD_SKILLS_DIR/" >&2
   echo "" >&2
-  echo "  IMP requires BMAD to run. Set up BMAD first:" >&2
+  echo "  IMP requires BMAD to run. Set up BMAD for $IMP_AGENT_PROVIDER first:" >&2
+  echo "  $BMAD_INSTALL_HINT" >&2
   echo "  → https://github.com/SauliusDev/bmad-method" >&2
   echo "" >&2
   echo "  Then re-run this installer." >&2
@@ -71,4 +81,4 @@ fi
 
 # ── 5. Hand off to Python installer ──────────────────────────────────────────
 
-exec python3 "$IMP_TMP/install.py" --project-dir "$(pwd)"
+exec python3 "$IMP_TMP/install.py" --project-dir "$(pwd)" --agent-provider "$IMP_AGENT_PROVIDER"

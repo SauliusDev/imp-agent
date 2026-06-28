@@ -49,6 +49,7 @@ PIPELINE_STEPS = ["spec", "dev", "review"]
 
 def load_config():
     defaults = {
+        "agent_provider": "claude",
         "model_spec": "claude-sonnet-4-6",
         "effort_spec": "medium",
         "model_dev": "claude-sonnet-4-6",

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse, asyncio, importlib.util, json, os, signal  # noqa: E401
 import subprocess, sys, threading, time  # noqa: E401
 from datetime import datetime, timezone
+from functools import lru_cache
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -32,6 +33,9 @@ _spec.loader.exec_module(imp_ledger)
 HALT_FILE = os.path.join(SCRIPT_DIR, "HALT")
 LOG_DIR = os.path.join(SCRIPT_DIR, "logs")
 CLAUDE_FLAGS = ["--dangerously-skip-permissions", "--verbose", "--include-partial-messages"]
+AGENT_PROVIDER_CLAUDE = "claude"
+AGENT_PROVIDER_CODEX = "codex"
+AGENT_PROVIDERS = {AGENT_PROVIDER_CLAUDE, AGENT_PROVIDER_CODEX}
 
 _HALT_SIGNAL = (
     "\n## Halt signal\n"
@@ -72,6 +76,32 @@ PREAMBLE_REVIEW = (
     "- Update the story file status and sprint-status.yaml as per your normal workflow"
     + _HALT_SIGNAL
 )
+
+CODEX_AUTONOMY_NOTE = (
+    "\n## CODEX EXECUTION NOTE\n"
+    "You are Codex running non-interactively through `codex exec`.\n"
+    "Do not ask the user for clarification or confirmation. Make reasonable assumptions,\n"
+    "complete this BMAD step fully, run relevant tests when possible, and update story and\n"
+    "sprint files according to the BMAD workflow. Write _imp/HALT only if the repository\n"
+    "structure makes the requested step impossible."
+)
+
+
+def _normalize_agent_provider(provider: str | None) -> str:
+    normalized = str(provider or AGENT_PROVIDER_CLAUDE).strip().lower()
+    if normalized not in AGENT_PROVIDERS:
+        return AGENT_PROVIDER_CLAUDE
+    return normalized
+
+
+def _is_claude_provider(config: dict) -> bool:
+    return _normalize_agent_provider(config.get("agent_provider")) == AGENT_PROVIDER_CLAUDE
+
+
+def _agent_prompt(prompt: str, provider: str) -> str:
+    if provider == AGENT_PROVIDER_CODEX:
+        return prompt + CODEX_AUTONOMY_NOTE
+    return prompt
 
 class SessionLogger:
     """Appends timestamped lines to _imp/logs/sessions/session-{timestamp}.log."""
@@ -380,7 +410,7 @@ def _tool_display_arg(name: str, inp: dict) -> str:
     return val[:_MAX_ARG_LEN] + "…" if len(val) > _MAX_ARG_LEN else val
 
 
-class StreamParser:
+class ClaudeStreamParser:
     """Stateful stream-json parser that accumulates tool input across lines.
 
     Emits complete lines only — text deltas are buffered until a newline,
@@ -448,6 +478,66 @@ class StreamParser:
         return out
 
 
+class CodexStreamParser:
+    """Tolerant parser for `codex exec --json` JSONL output."""
+
+    def feed(self, raw: str) -> list[str]:
+        raw = raw.strip()
+        if not raw:
+            return []
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+
+        out: list[str] = []
+        event_type = obj.get("type", "")
+        item = obj.get("item") if isinstance(obj.get("item"), dict) else {}
+        item_type = item.get("type", "")
+
+        if event_type == "item.started" and item_type == "command_execution":
+            command = str(item.get("command") or "").replace("\n", " ").strip()
+            out.append(f"[command] {command}" if command else "[command]")
+
+        elif event_type == "item.completed" and item_type == "error":
+            message = str(item.get("message") or "").strip()
+            out.append(f"[error] {message}" if message else "[error]")
+
+        elif event_type == "item.completed" and item_type == "agent_message":
+            text = str(item.get("text") or "")
+            out.extend(line for line in text.splitlines() if line.strip())
+
+        elif event_type == "item.completed" and item_type == "command_execution":
+            output = str(item.get("aggregated_output") or "")
+            out.extend(line for line in output.splitlines() if line.strip())
+            status = item.get("status")
+            exit_code = item.get("exit_code")
+            if status == "failed" or (exit_code not in (None, 0)):
+                out.append(f"[command exit {exit_code}]")
+
+        elif event_type == "turn.completed":
+            usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else {}
+            if usage:
+                input_tokens = usage.get("input_tokens")
+                output_tokens = usage.get("output_tokens")
+                if input_tokens is not None or output_tokens is not None:
+                    out.append(f"[usage] input={input_tokens or 0} output={output_tokens or 0}")
+
+        elif event_type == "error":
+            message = str(obj.get("message") or "").strip()
+            out.append(f"[error] {message}" if message else "[error]")
+
+        elif event_type == "turn.failed":
+            error = obj.get("error") if isinstance(obj.get("error"), dict) else {}
+            message = str(error.get("message") or "").strip()
+            out.append(f"[error] {message}" if message else "[error] turn failed")
+
+        return out
+
+
+StreamParser = ClaudeStreamParser
+
+
 # -- Step chain formatter --
 
 def format_step_chain(steps: dict) -> str:
@@ -474,35 +564,51 @@ def format_step_chain(steps: dict) -> str:
 
 # -- Subprocess runner --
 
-async def run_claude_subprocess(
+async def run_agent_subprocess(
     args: list[str],
     jsonl_log_path: str,
     readable_log_path: str,
     state: RunnerState,
+    parser,
+    stderr_to_readable: bool = False,
 ) -> int:
-    """Run a claude subprocess, stream output, return exit code.
+    """Run an agent subprocess, stream output, return exit code.
 
     The subprocess is started in its own process group (os.setsid) so that
-    quit_now() can kill the entire group including any children claude spawns.
+    quit_now() can kill the entire process group including any children it spawns.
     """
     os.makedirs(os.path.dirname(jsonl_log_path), exist_ok=True)
     os.makedirs(os.path.dirname(readable_log_path), exist_ok=True)
 
     proc = await asyncio.create_subprocess_exec(
         *args,
+        stdin=subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
+        stderr=asyncio.subprocess.PIPE if stderr_to_readable else asyncio.subprocess.STDOUT,
         cwd=PROJECT_ROOT,
         preexec_fn=os.setsid,  # new process group — enables killpg in quit_now
         limit=2**20,  # 1MB per line — default 64KB can overflow on long stream-json lines
     )
     state.subprocess_pid = proc.pid
 
-    parser = StreamParser()
     with (
         open(jsonl_log_path, "w", encoding="utf-8") as jsonl_f,
         open(readable_log_path, "w", encoding="utf-8") as readable_f,
     ):
+        async def read_stderr() -> None:
+            if proc.stderr is None:
+                return
+            while True:
+                raw_err = await proc.stderr.readline()
+                if not raw_err:
+                    break
+                text = raw_err.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    readable_f.write(f"[stderr] {text}\n")
+                    readable_f.flush()
+                    state.append_output(f"[stderr] {text}")
+
+        stderr_task = asyncio.create_task(read_stderr()) if stderr_to_readable else None
         while True:
             raw_line = await proc.stdout.readline()
             if not raw_line:
@@ -521,9 +627,23 @@ async def run_claude_subprocess(
                     if tool_name and tool_name[0].isupper():
                         state.increment_tool_count(tool_name)
 
-    exit_code = await proc.wait()
+        exit_code = await proc.wait()
+        if stderr_task is not None:
+            await stderr_task
     state.subprocess_pid = None
     return exit_code
+
+
+async def run_claude_subprocess(
+    args: list[str],
+    jsonl_log_path: str,
+    readable_log_path: str,
+    state: RunnerState,
+) -> int:
+    """Backward-compatible wrapper for callers that still run Claude directly."""
+    return await run_agent_subprocess(
+        args, jsonl_log_path, readable_log_path, state, ClaudeStreamParser(),
+    )
 
 
 # -- Step runners --
@@ -563,7 +683,9 @@ def _begin_step(
 
 def _record_completed(state: RunnerState, story_id: str, elapsed: float, log: str) -> None:
     """Append a StepRecord for a completed step."""
-    usage_5h, _, _ = read_usage_cache()
+    usage_5h = None
+    if _is_claude_provider(state.config):
+        usage_5h, _, _ = read_usage_cache()
     state.append_completed(StepRecord(
         story_id=story_id,
         steps_summary=_get_step_chain(state.epic_id),
@@ -583,9 +705,53 @@ def _build_claude_args(prompt: str, model: str, effort: str) -> list[str]:
     ]
 
 
+@lru_cache(maxsize=1)
+def _codex_supports_ask_for_approval() -> bool:
+    """Return True when this Codex CLI supports `--ask-for-approval never`."""
+    try:
+        result = subprocess.run(
+            ["codex", "exec", "--help"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return "--ask-for-approval" in result.stdout
+
+
+def _build_codex_args(prompt: str, model: str, effort: str) -> list[str]:
+    """Build the full `codex exec --json` argument list."""
+    args = [
+        "codex", "exec",
+        "--cd", PROJECT_ROOT,
+        "--sandbox", "danger-full-access",
+    ]
+    if _codex_supports_ask_for_approval():
+        args.extend(["--ask-for-approval", "never"])
+    else:
+        args.append("--dangerously-bypass-approvals-and-sandbox")
+    args.extend(["--json", "--model", model, prompt])
+    return args
+
+
+def _build_agent_args(provider: str, prompt: str, model: str, effort: str) -> list[str]:
+    provider = _normalize_agent_provider(provider)
+    if provider == AGENT_PROVIDER_CODEX:
+        return _build_codex_args(_agent_prompt(prompt, provider), model, effort)
+    return _build_claude_args(_agent_prompt(prompt, provider), model, effort)
+
+
+def _build_stream_parser(provider: str):
+    if _normalize_agent_provider(provider) == AGENT_PROVIDER_CODEX:
+        return CodexStreamParser()
+    return ClaudeStreamParser()
+
+
 async def _run_spec(
     state: RunnerState, session: SessionLogger, story_id: str,
-    story_file: str, model: str, effort: str,
+    story_file: str, model: str, effort: str, provider: str,
 ) -> None:
     """Run the spec step for a story."""
     if os.path.isfile(os.path.join(PROJECT_ROOT, story_file)):
@@ -608,8 +774,10 @@ async def _run_spec(
     session.log(f"{story_id}/spec: attempt {attempt_num} starting  →  {rel_log}")
 
     start = time.time()
-    await run_claude_subprocess(
-        _build_claude_args(prompt, model, effort), jsonl_path, readable_path, state,
+    await run_agent_subprocess(
+        _build_agent_args(provider, prompt, model, effort),
+        jsonl_path, readable_path, state, _build_stream_parser(provider),
+        stderr_to_readable=(provider == AGENT_PROVIDER_CODEX),
     )
     elapsed = time.time() - start
     state.clear_current()
@@ -633,7 +801,7 @@ async def _run_spec(
 
 async def _run_dev(
     state: RunnerState, session: SessionLogger, story_id: str,
-    story_file: str, model: str, effort: str,
+    story_file: str, model: str, effort: str, provider: str,
 ) -> None:
     """Run the dev step for a story."""
     imp_ledger.cmd_step_attempt(story_id, "dev")
@@ -647,8 +815,10 @@ async def _run_dev(
     prompt = f"/bmad-dev-story {story_file}\n{PREAMBLE_DEV}"
 
     start = time.time()
-    exit_code = await run_claude_subprocess(
-        _build_claude_args(prompt, model, effort), jsonl_path, readable_path, state,
+    exit_code = await run_agent_subprocess(
+        _build_agent_args(provider, prompt, model, effort),
+        jsonl_path, readable_path, state, _build_stream_parser(provider),
+        stderr_to_readable=(provider == AGENT_PROVIDER_CODEX),
     )
     elapsed = time.time() - start
     state.clear_current()
@@ -672,7 +842,7 @@ async def _run_dev(
 
 async def _run_review(
     state: RunnerState, session: SessionLogger, story_id: str,
-    story_file: str, model: str, effort: str, max_review: int,
+    story_file: str, model: str, effort: str, max_review: int, provider: str,
 ) -> None:
     """Run the review step for a story."""
     attempts_so_far = ledger_get_attempts(story_id, "review")
@@ -697,8 +867,10 @@ async def _run_review(
     prompt = f"/bmad-code-review {story_file}\n{PREAMBLE_REVIEW}"
 
     start = time.time()
-    await run_claude_subprocess(
-        _build_claude_args(prompt, model, effort), jsonl_path, readable_path, state,
+    exit_code = await run_agent_subprocess(
+        _build_agent_args(provider, prompt, model, effort),
+        jsonl_path, readable_path, state, _build_stream_parser(provider),
+        stderr_to_readable=(provider == AGENT_PROVIDER_CODEX),
     )
     elapsed = time.time() - start
     state.clear_current()
@@ -707,6 +879,13 @@ async def _run_review(
     if state.should_exit:
         ledger_story_interrupted(story_id)
         session.log(f"{story_id}/review: interrupted by user")
+        return
+
+    if exit_code != 0:
+        reason = f"review failed (exit {exit_code})"
+        ledger_story_blocked(story_id, reason)
+        session.log(f"{story_id}/review: BLOCKED — {reason}")
+        state.request_exit(1)
         return
 
     sprint_status = ledger_check_sprint_status(story_id)
@@ -754,8 +933,9 @@ def _check_between_steps(
     session.log("Config reloaded from disk")
     config = state.config  # use fresh config for all checks below
 
-    five_h = state.usage_5h
-    seven_d = state.usage_7d
+    usage_enabled = _is_claude_provider(config)
+    five_h = state.usage_5h if usage_enabled else None
+    seven_d = state.usage_7d if usage_enabled else None
 
     # Config values — base_limit_pct supersedes legacy usage_limit_threshold
     base_limit = int(config.get("base_limit_pct", 0) or config.get("usage_limit_threshold", 0))
@@ -765,54 +945,57 @@ def _check_between_steps(
     on_base = config.get("on_base_limit", "pause")
     on_extra = config.get("on_extra_limit", "quit")
 
-    # 1. Spillover guard — stop before extra credits are charged when no cap set
-    if not allow_extra and five_h is not None and five_h >= 98:
-        session.log(f"Spillover guard: 5h at {five_h:.0f}%, extra not allowed — stopping")
-        state.request_exit(0)
-        return True
-
-    # 2. Base caps — 5h and 7d (first hit wins)
-    limit_triggered = False
-    limit_reason = ""
-    if base_limit > 0 and five_h is not None and five_h >= base_limit:
-        limit_reason = f"5h usage {five_h:.0f}% >= {base_limit}%"
-        limit_triggered = True
-    elif limit_7d > 0 and seven_d is not None and seven_d >= limit_7d:
-        limit_reason = f"7d usage {seven_d:.0f}% >= {limit_7d}%"
-        limit_triggered = True
-
-    if limit_triggered:
-        # PL/QL runtime toggles override config default
-        if state.pause_on_limit:
-            action = "pause"
-        elif state.quit_on_limit:
-            action = "quit"
-        else:
-            action = on_base
-
-        session.log(f"Limit triggered: {limit_reason} — action: {action}")
-        if action == "pause":
-            state.set_paused()
-        else:
+    if usage_enabled:
+        # 1. Spillover guard — stop before extra credits are charged when no cap set
+        if not allow_extra and five_h is not None and five_h >= 98:
+            session.log(f"Spillover guard: 5h at {five_h:.0f}%, extra not allowed — stopping")
             state.request_exit(0)
             return True
 
-    # 3. Extra cap — financial hard stop
-    if allow_extra and extra_limit_eur > 0 and state.usage_extra_spent is not None:
-        try:
-            extra_spent = float(state.usage_extra_spent)
-            if extra_spent >= extra_limit_eur:
-                session.log(
-                    f"Extra cap: €{extra_spent:.2f} >= €{extra_limit_eur:.2f}"
-                    f" — action: {on_extra}"
-                )
-                if on_extra == "pause":
-                    state.set_paused()
-                else:
-                    state.request_exit(0)
-                    return True
-        except (ValueError, TypeError):
-            pass
+        # 2. Base caps — 5h and 7d (first hit wins)
+        limit_triggered = False
+        limit_reason = ""
+        if base_limit > 0 and five_h is not None and five_h >= base_limit:
+            limit_reason = f"5h usage {five_h:.0f}% >= {base_limit}%"
+            limit_triggered = True
+        elif limit_7d > 0 and seven_d is not None and seven_d >= limit_7d:
+            limit_reason = f"7d usage {seven_d:.0f}% >= {limit_7d}%"
+            limit_triggered = True
+
+        if limit_triggered:
+            # PL/QL runtime toggles override config default
+            if state.pause_on_limit:
+                action = "pause"
+            elif state.quit_on_limit:
+                action = "quit"
+            else:
+                action = on_base
+
+            session.log(f"Limit triggered: {limit_reason} — action: {action}")
+            if action == "pause":
+                state.set_paused()
+            else:
+                state.request_exit(0)
+                return True
+
+        # 3. Extra cap — financial hard stop
+        if allow_extra and extra_limit_eur > 0 and state.usage_extra_spent is not None:
+            try:
+                extra_spent = float(state.usage_extra_spent)
+                if extra_spent >= extra_limit_eur:
+                    session.log(
+                        f"Extra cap: €{extra_spent:.2f} >= €{extra_limit_eur:.2f}"
+                        f" — action: {on_extra}"
+                    )
+                    if on_extra == "pause":
+                        state.set_paused()
+                    else:
+                        state.request_exit(0)
+                        return True
+            except (ValueError, TypeError):
+                pass
+    else:
+        session.log("Usage polling disabled for Codex provider")
 
     # 4. pause_after — story-level planned stops (consume flag unconditionally)
     last_story = state.last_completed_story_id
@@ -947,6 +1130,7 @@ async def pipeline_main(state: RunnerState, session: SessionLogger) -> None:
 
         # Re-read config fresh after possible reload — affects next step's model/effort
         cfg = state.config
+        provider = _normalize_agent_provider(cfg.get("agent_provider"))
         model_spec = str(cfg.get("model_spec", "claude-sonnet-4-6"))
         effort_spec = str(cfg.get("effort_spec", "medium"))
         model_dev = str(cfg.get("model_dev", "claude-sonnet-4-6"))
@@ -957,24 +1141,24 @@ async def pipeline_main(state: RunnerState, session: SessionLogger) -> None:
         artifacts_dir = str(cfg.get("artifacts_dir", "_bmad-output/implementation-artifacts"))
 
         story_file = f"{artifacts_dir}/{story_id}.md"
-        session.log(f"Next: {story_id} -> step: {step}")
+        session.log(f"Next: {story_id} -> step: {step} provider={provider}")
 
         if step == "spec":
             await _run_spec(
                 state, session, story_id, story_file,
-                model_spec, effort_spec,
+                model_spec, effort_spec, provider,
             )
 
         elif step == "dev":
             await _run_dev(
                 state, session, story_id, story_file,
-                model_dev, effort_dev,
+                model_dev, effort_dev, provider,
             )
 
         elif step == "review":
             await _run_review(
                 state, session, story_id, story_file,
-                model_review, effort_review, max_review,
+                model_review, effort_review, max_review, provider,
             )
             # If story is fully done (removed from pending), flag for pause_after check
             if story_id not in state.pending_stories:
@@ -1095,14 +1279,17 @@ def main() -> None:
     )
     key_t.start()
 
-    # Start usage poller (daemon) — fires immediately, then every 60s
-    usage_t = threading.Thread(
-        target=_usage_poller_thread,
-        args=(state,),
-        daemon=True,
-        name="usage-poller",
-    )
-    usage_t.start()
+    # Start Claude usage poller only for Claude; Codex subscription usage has no local cache here.
+    if _is_claude_provider(state.config):
+        usage_t = threading.Thread(
+            target=_usage_poller_thread,
+            args=(state,),
+            daemon=True,
+            name="usage-poller",
+        )
+        usage_t.start()
+    else:
+        session.log("Usage poller disabled for Codex provider")
 
     # Main thread: display loop
     pipeline_t = None

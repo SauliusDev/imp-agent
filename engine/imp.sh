@@ -49,10 +49,12 @@ fi
 
 # 3. Ledger exists (not required for log-sync)
 FIRST_POS_ARG=""
+HELP_REQUESTED="false"
 for _arg in "$@"; do
+  case "$_arg" in -h|--help) HELP_REQUESTED="true" ;; esac
   case "$_arg" in -*) ;; *) FIRST_POS_ARG="$_arg"; break ;; esac
 done
-if [ "$FIRST_POS_ARG" != "log-sync" ] && [ ! -f "$SCRIPT_DIR/ledger.json" ]; then
+if [ "$HELP_REQUESTED" != "true" ] && [ "$FIRST_POS_ARG" != "log-sync" ] && [ ! -f "$SCRIPT_DIR/ledger.json" ]; then
   echo "Error: No ledger found at $SCRIPT_DIR/ledger.json" >&2
   echo "Run /imp-init first." >&2
   exit 1

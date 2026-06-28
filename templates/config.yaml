@@ -3,16 +3,29 @@
 # Changes take effect on the next imp.sh invocation.
 
 # ---------------------------------------------------------------------------
-# Per-step model and effort
+# Agent provider, per-step model, and effort
 # ---------------------------------------------------------------------------
-# Each pipeline step can use a different model + effort level.
-# Effort levels: low (fast/cheap), medium (balanced), high (deeper reasoning)
+# agent_provider: claude|codex
+# - claude uses Claude Code and BMAD skills under .claude/skills.
+# - codex uses Codex CLI subscription auth and BMAD skills under .agents/skills.
 #
-# Available models: claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5-20251001
+# Each pipeline step can use a different model + effort level.
+# Effort levels are passed to Claude. Codex currently ignores these values.
+#
+# Claude models: claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5-20251001
+# Codex models: gpt-5.5, or any model supported by your Codex CLI/account.
 #
 # spec   — generates story spec from PRD/epics/architecture. Document work.
 # dev    — implements the story. Writes actual code.
 # review — adversarial code review. Quality gate.
+
+agent_provider: claude
+
+# Codex example:
+# agent_provider: codex
+# model_spec: gpt-5.5
+# model_dev: gpt-5.5
+# model_review: gpt-5.5
 
 model_spec: claude-sonnet-4-6
 effort_spec: high
