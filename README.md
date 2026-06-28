@@ -22,6 +22,8 @@ I built it because running BMAD stories by hand means babysitting a terminal. Yo
 
 Both **Claude Code** and **Codex CLI** are supported.
 
+![IMP Agent terminal demo](demo.png)
+
 ## Install
 
 Run from your project root (BMAD must already be set up):
@@ -89,5 +91,3 @@ Keyboard shortcuts while running:
 ## Re-installing / updating
 
 Re-run the same `curl` command. Engine files are always overwritten. Your `_imp/config.yaml` and `_imp/ledger.json` are preserved.
-
-![IMP Agent terminal demo](demo.png)
