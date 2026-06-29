@@ -104,7 +104,7 @@ Re-run the same `curl` command. Engine files are always overwritten. Your `_imp/
 IMP has three phases: **init**, **loop**, and **gate checks** between every step.
 
 ```mermaid
-%%{init: {'theme': 'default', 'look': 'handDrawn', 'flowchart': {'curve': 'basis'}}}%%
+%%{init: {'theme': 'default', 'flowchart': {'curve': 'basis'}}}%%
 flowchart TD
     A([sprint-status.yaml]) -->|imp-init skill| B[(ledger.json)]
     B --> C[imp.sh all]
@@ -129,7 +129,7 @@ flowchart TD
 **Three threads run concurrently:**
 
 ```mermaid
-%%{init: {'theme': 'default', 'look': 'handDrawn'}}%%
+%%{init: {'theme': 'default'}}%%
 flowchart LR
     subgraph threads["three threads"]
         T1[pipeline\norchestrator]
