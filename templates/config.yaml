@@ -63,7 +63,14 @@ artifacts_dir: _bmad-output/implementation-artifacts
 # extra_limit_eur — hard stop when extra credit spend reaches this € (0 = off).
 # on_base_limit   — action when base/7d cap is hit: "pause" or "quit".
 # on_extra_limit  — action when extra € cap is hit: "pause" or "quit".
+#
+# Codex usage source:
+# - auto        — use the best available source; prefers cache under codex-multi-auth.
+# - app_server  — only use `codex app-server` account/rateLimits/read.
+# - quota_cache — only read ~/.codex/multi-auth/quota-cache.json.
+# - off         — disable Codex usage polling.
 
+codex_usage_source: auto
 base_limit_pct: 0
 limit_7d_pct: 0
 extra_limit_eur: 50.00

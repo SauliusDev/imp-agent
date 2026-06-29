@@ -17,6 +17,7 @@ sys.path.insert(0, SCRIPT_DIR)
 from imp_state import RunnerState, StepRecord, CurrentStep, create_initial_state  # noqa: E402
 from imp_keys import start_keyreader  # noqa: E402
 from imp_usage import read_usage_cache, check_threshold, is_stale, fetch_full_usage  # noqa: E402
+from imp_codex_usage import fetch_codex_usage  # noqa: E402
 
 try:
     from imp_display import build_layout  # noqa: E402
@@ -96,6 +97,18 @@ def _normalize_agent_provider(provider: str | None) -> str:
 
 def _is_claude_provider(config: dict) -> bool:
     return _normalize_agent_provider(config.get("agent_provider")) == AGENT_PROVIDER_CLAUDE
+
+
+def _is_codex_provider(config: dict) -> bool:
+    return _normalize_agent_provider(config.get("agent_provider")) == AGENT_PROVIDER_CODEX
+
+
+def _codex_usage_source(config: dict) -> str:
+    return str(config.get("codex_usage_source", "auto")).strip().lower()
+
+
+def _codex_usage_enabled(config: dict) -> bool:
+    return _is_codex_provider(config) and _codex_usage_source(config) not in ("off", "false", "none", "0")
 
 
 def _agent_prompt(prompt: str, provider: str) -> str:
@@ -933,7 +946,7 @@ def _check_between_steps(
     session.log("Config reloaded from disk")
     config = state.config  # use fresh config for all checks below
 
-    usage_enabled = _is_claude_provider(config)
+    usage_enabled = _is_claude_provider(config) or _codex_usage_enabled(config)
     five_h = state.usage_5h if usage_enabled else None
     seven_d = state.usage_7d if usage_enabled else None
 
@@ -944,6 +957,13 @@ def _check_between_steps(
     allow_extra = extra_limit_eur > 0  # extra credits allowed iff a cap is set
     on_base = config.get("on_base_limit", "pause")
     on_extra = config.get("on_extra_limit", "quit")
+
+    codex_usage_missing = False
+    if usage_enabled:
+        if _is_codex_provider(config) and five_h is None and seven_d is None:
+            session.log("Codex usage unavailable; usage caps not enforced for this step")
+            usage_enabled = False
+            codex_usage_missing = True
 
     if usage_enabled:
         # 1. Spillover guard — stop before extra credits are charged when no cap set
@@ -994,7 +1014,7 @@ def _check_between_steps(
                         return True
             except (ValueError, TypeError):
                 pass
-    else:
+    elif _is_codex_provider(config) and not codex_usage_missing:
         session.log("Usage polling disabled for Codex provider")
 
     # 4. pause_after — story-level planned stops (consume flag unconditionally)
@@ -1063,6 +1083,30 @@ def _usage_poller_thread(state: RunnerState, interval: float = 60.0) -> None:
                 updated_at=time.time(),
             )
         # Sleep in 0.5s slices so display_exit is detected promptly
+        elapsed = 0.0
+        while elapsed < interval and not state.display_exit:
+            time.sleep(0.5)
+            elapsed += 0.5
+
+
+def _codex_usage_poller_thread(state: RunnerState, interval: float = 60.0) -> None:
+    """Background thread: fetch Codex subscription quota when available."""
+    while not state.display_exit:
+        source = _codex_usage_source(state.config)
+        data = fetch_codex_usage(source)
+        if data:
+            state.update_full_usage(
+                usage_5h=data.get("five_hour_pct"),
+                usage_7d=data.get("seven_day_pct"),
+                usage_sonnet=None,
+                usage_extra_pct=None,
+                usage_extra_spent=None,
+                usage_extra_account_cap=None,
+                usage_decision=data.get("decision", "PROCEED"),
+                five_h_resets_at=data.get("five_hour_resets"),
+                seven_d_resets_at=data.get("seven_day_resets"),
+                updated_at=time.time(),
+            )
         elapsed = 0.0
         while elapsed < interval and not state.display_exit:
             time.sleep(0.5)
@@ -1279,7 +1323,7 @@ def main() -> None:
     )
     key_t.start()
 
-    # Start Claude usage poller only for Claude; Codex subscription usage has no local cache here.
+    # Start provider-specific usage poller.
     if _is_claude_provider(state.config):
         usage_t = threading.Thread(
             target=_usage_poller_thread,
@@ -1288,6 +1332,15 @@ def main() -> None:
             name="usage-poller",
         )
         usage_t.start()
+    elif _codex_usage_enabled(state.config):
+        usage_t = threading.Thread(
+            target=_codex_usage_poller_thread,
+            args=(state,),
+            daemon=True,
+            name="codex-usage-poller",
+        )
+        usage_t.start()
+        session.log(f"Codex usage poller enabled ({_codex_usage_source(state.config)})")
     else:
         session.log("Usage poller disabled for Codex provider")
 

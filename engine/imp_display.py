@@ -91,7 +91,9 @@ def _build_header(state: RunnerState) -> Panel:
     provider = _agent_provider(cfg)
 
     if provider == "codex":
-        usage_5h = usage_7d = usage_snt = "off"
+        usage_5h = _fmt_usage(state.usage_5h, stale=stale)
+        usage_7d = _fmt_usage(state.usage_7d, stale=stale)
+        usage_snt = "off"
     else:
         usage_5h = _fmt_usage(state.usage_5h, stale=stale)
         usage_7d = _fmt_usage(state.usage_7d, stale=stale)

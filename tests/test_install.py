@@ -17,12 +17,16 @@ from imp_runner import (
     _build_codex_args,
     run_agent_subprocess,
 )
+from imp_codex_usage import (
+    _usage_from_app_server_payload,
+    _usage_from_quota_cache,
+)
 from imp_state import create_initial_state
 
 
 def test_install_engine_fresh(tmp_path):
     count, was_update = install_engine(tmp_path)
-    assert count == 7
+    assert count == 8
     assert was_update is False
     assert (tmp_path / "_imp" / "imp.sh").exists()
     assert (tmp_path / "_imp" / "imp_runner.py").exists()
@@ -125,6 +129,62 @@ def test_claude_parser_still_parses_text_delta():
         '"delta":{"type":"text_delta","text":"hello\\n"}}}'
     )
     assert parser.feed(line) == ["hello"]
+
+
+def test_codex_usage_normalizes_app_server_rate_limits():
+    payload = {
+        "rateLimits": {
+            "primary": {
+                "usedPercent": 91,
+                "windowDurationMins": 300,
+                "resetsAt": "2026-06-28T14:00:00Z",
+            },
+            "secondary": {
+                "usedPercent": 82,
+                "windowDurationMins": 10080,
+                "resetsAt": "2026-07-05T14:00:00Z",
+            },
+        }
+    }
+
+    usage = _usage_from_app_server_payload(payload)
+
+    assert usage == {
+        "five_hour_pct": 91,
+        "seven_day_pct": 82,
+        "five_hour_resets": "2026-06-28T14:00:00Z",
+        "seven_day_resets": "2026-07-05T14:00:00Z",
+        "decision": "PROCEED",
+        "source": "codex-app-server",
+    }
+
+
+def test_codex_usage_reads_freshest_multi_auth_quota_cache():
+    payload = {
+        "version": 1,
+        "byAccountId": {
+            "older": {
+                "updatedAt": 100,
+                "status": 200,
+                "primary": {"usedPercent": 5, "windowMinutes": 300, "resetAtMs": 2000},
+                "secondary": {"usedPercent": 10, "windowMinutes": 10080, "resetAtMs": 3000},
+            },
+            "newer": {
+                "updatedAt": 200,
+                "status": 200,
+                "primary": {"usedPercent": 23, "windowMinutes": 300, "resetAtMs": 4000},
+                "secondary": {"usedPercent": 66, "windowMinutes": 10080, "resetAtMs": 5000},
+            },
+        },
+    }
+
+    usage = _usage_from_quota_cache(payload)
+
+    assert usage["five_hour_pct"] == 23
+    assert usage["seven_day_pct"] == 66
+    assert usage["source"] == "codex-quota-cache"
+    assert usage["five_hour_resets"] == "1970-01-01T00:00:04Z"
+    assert usage["seven_day_resets"] == "1970-01-01T00:00:05Z"
 
 
 def test_run_agent_subprocess_can_keep_stderr_out_of_jsonl(tmp_path):

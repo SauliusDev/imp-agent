@@ -69,7 +69,14 @@ agent_provider: codex
 model_spec: gpt-5.5
 model_dev: gpt-5.5
 model_review: gpt-5.5
+codex_usage_source: auto  # app_server|quota_cache|off also supported
+base_limit_pct: 90        # optional 5h cap
+limit_7d_pct: 80          # optional weekly cap
 ```
+
+Codex usage caps are best-effort. IMP can read subscription quota from
+`codex app-server` or from `~/.codex/multi-auth/quota-cache.json`; `auto`
+chooses the smoother source for the current Codex runtime.
 
 ## Usage
 
@@ -91,3 +98,48 @@ Keyboard shortcuts while running:
 ## Re-installing / updating
 
 Re-run the same `curl` command. Engine files are always overwritten. Your `_imp/config.yaml` and `_imp/ledger.json` are preserved.
+
+## Working principle
+
+IMP has three phases: **init**, **loop**, and **gate checks** between every step.
+
+```mermaid
+%%{init: {'theme': 'default', 'look': 'handDrawn', 'flowchart': {'curve': 'basis'}}}%%
+flowchart TD
+    A([sprint-status.yaml]) -->|imp-init skill| B[(ledger.json)]
+    B --> C[imp.sh all]
+    C --> D{next story?}
+    D -->|none left| Z([done])
+    D -->|yes| E[bmad-create-story\nspec step]
+    E --> G1{usage cap?}
+    G1 -->|over limit| P1([pause / quit])
+    G1 -->|ok| F[bmad-dev-story\ndev step]
+    F --> G2{usage cap?}
+    G2 -->|over limit| P2([pause / quit])
+    G2 -->|ok| G[bmad-code-review\nreview step]
+    G --> H{pass?}
+    H -->|fail| I[requeue to\nprior step]
+    I --> F
+    H -->|pass| J[mark done\nin ledger]
+    J --> K{pause\nconfigured?}
+    K -->|yes| L([operator gate])
+    K -->|no| D
+```
+
+**Three threads run concurrently:**
+
+```mermaid
+%%{init: {'theme': 'default', 'look': 'handDrawn'}}%%
+flowchart LR
+    subgraph threads["three threads"]
+        T1[pipeline\norchestrator]
+        T2[keypress\nreader]
+        T3[usage\npoller]
+    end
+    T1 <-->|shared state| T2
+    T1 <-->|cap signals| T3
+```
+
+The pipeline thread spawns each BMAD skill as a subprocess and streams output to the Rich TUI. The keypress thread reads raw TTY so `p / l / r / q` work at any point. The usage poller samples Claude's 5h/7d consumption and signals the pipeline to pause or quit when caps are hit.
+
+Every step result is written to `ledger.json` immediately — kill the process any time and restart from the exact same story and step.
