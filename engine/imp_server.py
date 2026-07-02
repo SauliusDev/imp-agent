@@ -12,6 +12,8 @@ from imp_state import RunnerState
 def web_dist_path(base_file: str | Path = __file__) -> Path:
     script_dir = Path(base_file).resolve().parent
     installed_dist = script_dir / "web" / "dist"
+    if script_dir.name == "_imp":
+        return installed_dist
     if installed_dist.exists():
         return installed_dist
     return script_dir.parent / "web" / "dist"

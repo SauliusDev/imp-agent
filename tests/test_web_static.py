@@ -30,6 +30,17 @@ def test_web_dist_path_prefers_installed_sibling_web_dist(tmp_path):
     assert web_dist_path(installed_server) == installed_dist
 
 
+def test_web_dist_path_does_not_fallback_to_host_web_dist_for_installed_imp(tmp_path):
+    installed_server = tmp_path / "_imp" / "imp_server.py"
+    installed_dist = tmp_path / "_imp" / "web" / "dist"
+    host_dist = tmp_path / "web" / "dist"
+    installed_server.parent.mkdir()
+    installed_server.write_text("# copied server")
+    host_dist.mkdir(parents=True)
+
+    assert web_dist_path(installed_server) == installed_dist
+
+
 def test_web_dist_path_falls_back_to_repo_web_dist(tmp_path):
     source_server = tmp_path / "engine" / "imp_server.py"
     repo_dist = tmp_path / "web" / "dist"
