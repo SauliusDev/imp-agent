@@ -89,15 +89,18 @@ bash _imp/imp.sh --help
 
 ## Local Web UI
 
-Build the web UI and run IMP with the local API server:
+Run IMP with the local API server:
 
 ```bash
 python3 -m pip install fastapi uvicorn
-cd web && npm install && npm run build && cd ..
 python3 _imp/imp_runner.py all --web
 ```
 
 Open `http://127.0.0.1:8765`.
+
+Installed projects use the bundled `_imp/web/dist` copied by `install.py`.
+When developing from this source repo, rebuild the web bundle with
+`cd web && npm install && npm run build`.
 
 IMP binds the web server to localhost by default. Binding to a non-localhost
 host requires `--allow-remote-web`.

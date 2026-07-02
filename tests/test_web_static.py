@@ -18,6 +18,28 @@ def test_web_dist_path_points_to_repo_web_dist():
     assert path == Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
+def test_web_dist_path_prefers_installed_sibling_web_dist(tmp_path):
+    installed_server = tmp_path / "_imp" / "imp_server.py"
+    installed_dist = tmp_path / "_imp" / "web" / "dist"
+    repo_dist = tmp_path / "web" / "dist"
+    installed_server.parent.mkdir()
+    installed_server.write_text("# copied server")
+    installed_dist.mkdir(parents=True)
+    repo_dist.mkdir(parents=True)
+
+    assert web_dist_path(installed_server) == installed_dist
+
+
+def test_web_dist_path_falls_back_to_repo_web_dist(tmp_path):
+    source_server = tmp_path / "engine" / "imp_server.py"
+    repo_dist = tmp_path / "web" / "dist"
+    source_server.parent.mkdir()
+    source_server.write_text("# source server")
+    repo_dist.mkdir(parents=True)
+
+    assert web_dist_path(source_server) == repo_dist
+
+
 def test_static_mount_serves_web_and_preserves_api_state_when_fastapi_is_installed(
     monkeypatch,
     tmp_path,

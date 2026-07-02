@@ -9,8 +9,12 @@ from pathlib import Path
 from imp_state import RunnerState
 
 
-def web_dist_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "web" / "dist"
+def web_dist_path(base_file: str | Path = __file__) -> Path:
+    script_dir = Path(base_file).resolve().parent
+    installed_dist = script_dir / "web" / "dist"
+    if installed_dist.exists():
+        return installed_dist
+    return script_dir.parent / "web" / "dist"
 
 
 def build_state_snapshot(state: RunnerState) -> dict:

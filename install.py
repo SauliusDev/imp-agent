@@ -17,7 +17,7 @@ PROJECT_MARKERS = ["package.json", "pyproject.toml", "go.mod", "Cargo.toml"]
 
 
 def install_engine(project_dir: Path) -> tuple[int, bool]:
-    """Copy engine/ → _imp/. Returns (file_count, was_update)."""
+    """Copy engine/ and built web assets → _imp/. Returns (file_count, was_update)."""
     imp_dir = project_dir / "_imp"
     was_update = imp_dir.exists()
     imp_dir.mkdir(exist_ok=True)
@@ -28,6 +28,13 @@ def install_engine(project_dir: Path) -> tuple[int, bool]:
         if src.is_file():
             shutil.copy2(src, imp_dir / src.name)
             count += 1
+
+    web_dist = SCRIPT_DIR / "web" / "dist"
+    if web_dist.exists():
+        web_dest = imp_dir / "web" / "dist"
+        if web_dest.exists():
+            shutil.rmtree(web_dest)
+        shutil.copytree(web_dist, web_dest)
 
     (imp_dir / "imp.sh").chmod(0o755)
     return count, was_update

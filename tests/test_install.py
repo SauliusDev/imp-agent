@@ -2,6 +2,8 @@ import sys
 import asyncio
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "engine"))
 
@@ -31,6 +33,16 @@ def test_install_engine_fresh(tmp_path):
     assert (tmp_path / "_imp" / "imp.sh").exists()
     assert (tmp_path / "_imp" / "imp_runner.py").exists()
     assert (tmp_path / "_imp" / "imp_server.py").exists()
+
+
+def test_install_engine_copies_web_dist_when_source_dist_exists(tmp_path):
+    source_dist = Path(__file__).parent.parent / "web" / "dist"
+    if not source_dist.exists():
+        pytest.skip("source web/dist is not built")
+
+    install_engine(tmp_path)
+
+    assert (tmp_path / "_imp" / "web" / "dist" / "index.html").exists()
 
 
 def test_install_engine_imp_sh_is_executable(tmp_path):
