@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "engine"))
 
 from imp_server import build_state_snapshot, create_app
+from imp_runner import _is_loopback_web_host, _make_start_run_once, _validate_web_host
 from imp_state import CurrentStep, create_initial_state
 
 
@@ -100,3 +101,65 @@ def test_create_app_routes_call_callbacks_when_fastapi_is_installed():
         assert response.status_code == 200
         assert response.json() == {"ok": True}
         assert calls[-1] == name
+
+
+def test_api_quit_calls_quit_and_shutdown_when_fastapi_is_installed():
+    try:
+        from fastapi.testclient import TestClient
+    except ImportError:
+        pytest.skip("FastAPI is not installed")
+
+    state = create_initial_state({"agent_provider": "codex"}, "all")
+    calls = []
+    app = create_app(
+        state,
+        start_run=lambda: calls.append("run"),
+        pause=lambda: calls.append("pause"),
+        resume=lambda: calls.append("resume"),
+        quit_now=lambda: calls.append("quit"),
+        reload_config=lambda: calls.append("reload"),
+        shutdown_server=lambda: calls.append("shutdown"),
+    )
+
+    response = TestClient(app).post("/api/quit")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert calls == ["quit", "shutdown"]
+
+
+def test_make_start_run_once_ignores_repeated_requests():
+    state = create_initial_state({"agent_provider": "codex"}, "all")
+    calls = []
+
+    class Session:
+        def log(self, message):
+            calls.append(("log", message))
+
+    start_run = _make_start_run_once(
+        state,
+        Session(),
+        lambda: calls.append(("start", "pipeline")),
+    )
+
+    start_run()
+    start_run()
+
+    assert state.app_phase == "running"
+    assert calls.count(("start", "pipeline")) == 1
+    assert ("log", "Web run requested while pipeline already started") in calls
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "[::1]"])
+def test_loopback_web_host_allows_safe_defaults(host):
+    assert _is_loopback_web_host(host) is True
+    assert _validate_web_host(host, allow_remote_web=False) is None
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::", "example.com"])
+def test_web_host_guard_requires_explicit_remote_opt_in(host):
+    assert _is_loopback_web_host(host) is False
+    message = _validate_web_host(host, allow_remote_web=False)
+    assert message is not None
+    assert "--allow-remote-web" in message
+    assert _validate_web_host(host, allow_remote_web=True) is None

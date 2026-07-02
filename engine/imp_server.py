@@ -58,6 +58,7 @@ def create_app(
     resume: Callable[[], None],
     quit_now: Callable[[], None],
     reload_config: Callable[[], None],
+    shutdown_server: Callable[[], None] | None = None,
 ):
     try:
         from fastapi import FastAPI
@@ -89,6 +90,8 @@ def create_app(
     @app.post("/api/quit")
     def api_quit():
         quit_now()
+        if shutdown_server is not None:
+            shutdown_server()
         return {"ok": True}
 
     @app.post("/api/reload-config")

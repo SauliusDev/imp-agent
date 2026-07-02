@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse, asyncio, importlib.util, json, os, shlex, signal  # noqa: E401
 import subprocess, sys, threading, time  # noqa: E401
+from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import lru_cache
 
@@ -45,6 +46,7 @@ CLAUDE_FLAGS = ["--dangerously-skip-permissions", "--verbose", "--include-partia
 AGENT_PROVIDER_CLAUDE = "claude"
 AGENT_PROVIDER_CODEX = "codex"
 AGENT_PROVIDERS = {AGENT_PROVIDER_CLAUDE, AGENT_PROVIDER_CODEX}
+LOOPBACK_WEB_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 _HALT_SIGNAL = (
     "\n## Halt signal\n"
@@ -123,6 +125,27 @@ def _agent_prompt(prompt: str, provider: str) -> str:
     if provider == AGENT_PROVIDER_CODEX:
         return prompt + CODEX_AUTONOMY_NOTE
     return prompt
+
+
+def _normalize_web_host(host: str) -> str:
+    normalized = str(host or "").strip().lower()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        return normalized[1:-1]
+    return normalized
+
+
+def _is_loopback_web_host(host: str) -> bool:
+    return _normalize_web_host(host) in LOOPBACK_WEB_HOSTS
+
+
+def _validate_web_host(host: str, *, allow_remote_web: bool) -> str | None:
+    if allow_remote_web or _is_loopback_web_host(host):
+        return None
+    return (
+        f"Refusing to bind unauthenticated web API to non-loopback host {host!r}. "
+        "Use --host 127.0.0.1 or pass --allow-remote-web to opt in."
+    )
+
 
 class SessionLogger:
     """Appends timestamped lines to _imp/logs/sessions/session-{timestamp}.log."""
@@ -1371,6 +1394,28 @@ def _make_quit_now(state: RunnerState, session: SessionLogger):
     return quit_now
 
 
+def _make_start_run_once(
+    state: RunnerState,
+    session: SessionLogger,
+    start_pipeline: Callable[[], None],
+) -> Callable[[], None]:
+    pipeline_lock = threading.Lock()
+    pipeline_started = False
+
+    def start_run_once() -> None:
+        nonlocal pipeline_started
+        with pipeline_lock:
+            if pipeline_started:
+                session.log("Web run requested while pipeline already started")
+                return
+            pipeline_started = True
+            state.confirm_launch()
+            session.log("Web run requested — starting pipeline")
+            start_pipeline()
+
+    return start_run_once
+
+
 def main() -> None:
     """Entry point — parse args, start threads, run display loop."""
     parser = argparse.ArgumentParser(
@@ -1403,7 +1448,18 @@ def main() -> None:
         default=8765,
         help="Web API bind port",
     )
+    parser.add_argument(
+        "--allow-remote-web",
+        action="store_true",
+        help="Allow unauthenticated web API to bind to a non-loopback host",
+    )
     args = parser.parse_args()
+
+    if args.web:
+        host_error = _validate_web_host(args.host, allow_remote_web=args.allow_remote_web)
+        if host_error is not None:
+            print(host_error, file=sys.stderr)
+            sys.exit(2)
 
     # Load config and verify ledger exists
     config = imp_ledger.CONFIG
@@ -1441,25 +1497,18 @@ def main() -> None:
     if args.web:
         _start_usage_poller(state, session)
         pipeline_t = None
-        pipeline_lock = threading.Lock()
-        pipeline_started = False
 
-        def start_run_once() -> None:
-            nonlocal pipeline_t, pipeline_started
-            with pipeline_lock:
-                if pipeline_started:
-                    session.log("Web run requested while pipeline already started")
-                    return
-                pipeline_started = True
-                state.confirm_launch()
-                session.log("Web run requested — starting pipeline")
-                pipeline_t = threading.Thread(
-                    target=_pipeline_thread,
-                    args=(state, session),
-                    daemon=True,
-                    name="pipeline",
-                )
-                pipeline_t.start()
+        def start_pipeline_thread() -> None:
+            nonlocal pipeline_t
+            pipeline_t = threading.Thread(
+                target=_pipeline_thread,
+                args=(state, session),
+                daemon=True,
+                name="pipeline",
+            )
+            pipeline_t.start()
+
+        start_run_once = _make_start_run_once(state, session, start_pipeline_thread)
 
         try:
             from imp_server import create_app
@@ -1474,6 +1523,12 @@ def main() -> None:
             print(f"Missing dependency: {exc.name}", file=sys.stderr)
             sys.exit(1)
 
+        server = None
+
+        def shutdown_server() -> None:
+            if server is not None:
+                server.should_exit = True
+
         try:
             app = create_app(
                 state,
@@ -1482,6 +1537,7 @@ def main() -> None:
                 resume=state.clear_paused,
                 quit_now=quit_now,
                 reload_config=reload_config_now,
+                shutdown_server=shutdown_server,
             )
         except RuntimeError as exc:
             session.close()
@@ -1489,9 +1545,14 @@ def main() -> None:
             sys.exit(1)
 
         try:
-            uvicorn.run(app, host=args.host, port=args.port)
+            config = uvicorn.Config(app, host=args.host, port=args.port)
+            server = uvicorn.Server(config)
+            server.run()
         except KeyboardInterrupt:
             quit_now()
+        finally:
+            if not state.display_exit:
+                quit_now()
 
         session.log(f"Exiting with code {state.exit_code}")
         session.close()
