@@ -30,6 +30,16 @@ def test_build_session_name_sanitizes_story_and_step():
     assert " " not in name
 
 
+def test_build_session_name_sanitizes_dotdot_parts(tmp_path):
+    name = build_session_name("run..1", "../my story", r"dev\..\step")
+
+    assert ".." not in name
+    assert "/" not in name
+    assert "\\" not in name
+    assert " " not in name
+    session_paths(name, tmp_path)
+
+
 def test_session_paths_rejects_escape_names(tmp_path):
     with pytest.raises(ValueError):
         session_paths("../bad", tmp_path)

@@ -154,6 +154,7 @@ def kill_session(session: str, project_root: str | Path) -> None:
 
 def _safe_part(value: str) -> str:
     part = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
+    part = re.sub(r"\.{2,}", "-", part)
     part = re.sub(r"-+", "-", part).strip("-")
     return part or "unknown"
 
