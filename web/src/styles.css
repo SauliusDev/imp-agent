@@ -1,0 +1,359 @@
+:root {
+  color: #eef2f4;
+  background: #111312;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 18px;
+  background:
+    linear-gradient(180deg, rgba(37, 43, 39, 0.95), rgba(17, 19, 18, 1)),
+    #111312;
+}
+
+.centered {
+  display: grid;
+  place-items: center;
+  color: #b8c0bb;
+}
+
+.error-state,
+.control-error,
+.notice.danger {
+  color: #ffc7c7;
+}
+
+.topbar,
+.control-strip,
+.panel,
+.notice {
+  border: 1px solid rgba(232, 238, 232, 0.12);
+  background: rgba(24, 28, 26, 0.92);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.24);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 76px;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+.brand-icon {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.headline {
+  min-width: 0;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 20px;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: 14px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.headline p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 6px;
+  color: #aeb8b1;
+  font-size: 13px;
+}
+
+.headline p span:not(:last-child)::after {
+  content: "/";
+  margin-left: 7px;
+  color: #5f6962;
+}
+
+.usage {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+  color: #dce7df;
+  font-size: 13px;
+}
+
+.usage span,
+.status-pill,
+.row-status,
+.panel-title span {
+  border: 1px solid rgba(221, 230, 223, 0.12);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+}
+
+.control-strip {
+  margin: 12px 0;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.control-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.control-buttons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 106px;
+  min-height: 38px;
+  border: 1px solid rgba(209, 222, 213, 0.16);
+  border-radius: 6px;
+  padding: 0 12px;
+  color: #f4f7f5;
+  background: #243029;
+  cursor: pointer;
+}
+
+.control-buttons button:hover:not(:disabled) {
+  background: #2e3e35;
+}
+
+.control-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.control-error {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #ffd992;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.55fr);
+  gap: 12px;
+}
+
+.panel {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.panel-title span,
+.muted {
+  color: #aeb8b1;
+  font-size: 13px;
+}
+
+.roadmap-list {
+  display: grid;
+  gap: 6px;
+  max-height: 426px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.roadmap-row {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.38fr) minmax(120px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  padding: 7px 8px;
+  border-left: 3px solid #445148;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d1d8d3;
+  font-size: 13px;
+}
+
+.roadmap-row.epic {
+  border-left-color: #c8b26b;
+  background: rgba(200, 178, 107, 0.08);
+  color: #fbf1cf;
+  font-weight: 700;
+}
+
+.roadmap-row.done,
+.roadmap-row.done-session {
+  border-left-color: #69bf78;
+  color: #bdebc5;
+}
+
+.roadmap-row.blocked,
+.roadmap-row.failed {
+  border-left-color: #d56b6b;
+  color: #ffd2d2;
+}
+
+.row-id,
+.row-detail,
+.row-status,
+.roadmap-row em,
+.meta-grid dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.roadmap-row em {
+  grid-column: 2 / 4;
+  color: #ffb7b7;
+  font-style: normal;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 9px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.meta-grid dt {
+  color: #93a098;
+}
+
+.meta-grid dd {
+  margin: 0;
+  color: #ecf1ee;
+}
+
+.output-panel,
+.terminal-panel {
+  grid-column: 1 / -1;
+}
+
+.output-panel pre {
+  min-height: 240px;
+  max-height: 42vh;
+  margin: 0;
+  overflow: auto;
+  color: #d9e0dc;
+  font: 12px/1.5 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
+
+.terminal-placeholder {
+  display: grid;
+  min-height: 128px;
+  place-items: center;
+  padding: 12px;
+  border: 1px dashed rgba(219, 228, 221, 0.18);
+  border-radius: 6px;
+  color: #aeb8b1;
+  background: #101411;
+}
+
+.terminal-placeholder p {
+  max-width: 100%;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 820px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .usage {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 66px;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 540px) {
+  .topbar {
+    gap: 10px;
+  }
+
+  .brand-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .usage {
+    margin-left: 0;
+  }
+
+  .control-buttons button {
+    flex: 1 1 130px;
+  }
+
+  .roadmap-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .roadmap-row em {
+    grid-column: auto;
+  }
+
+  .meta-grid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
