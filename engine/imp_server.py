@@ -4,8 +4,13 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from imp_state import RunnerState
+
+
+def web_dist_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
 def build_state_snapshot(state: RunnerState) -> dict:
@@ -108,5 +113,14 @@ def create_app(
                 await asyncio.sleep(1)
 
         return StreamingResponse(stream(), media_type="text/event-stream")
+
+    try:
+        from fastapi.staticfiles import StaticFiles
+
+        dist = web_dist_path()
+        if dist.exists():
+            app.mount("/", StaticFiles(directory=str(dist), html=True), name="web")
+    except ImportError:
+        pass
 
     return app
