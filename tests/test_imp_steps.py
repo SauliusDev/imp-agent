@@ -37,17 +37,34 @@ def test_build_step_prompt_keeps_current_spec_contract():
     assert "/bmad-create-story 1-1-example" in prompt
     assert "MUST be written to exactly this path" in prompt
     assert "_bmad-output/implementation-artifacts/1-1-example.md" in prompt
+    assert "- Do NOT use HALT or ask for clarification — make reasonable assumptions" in prompt
+    assert "write a short explanation to the file _imp/HALT and then exit." in prompt
 
 
 def test_build_step_prompt_keeps_current_dev_and_review_contracts():
     story_file = "_bmad-output/implementation-artifacts/1-1-example.md"
 
-    assert build_step_prompt("dev", story_id="1-1-example", story_file=story_file).startswith(
-        f"/bmad-dev-story {story_file}"
+    dev_prompt = build_step_prompt("dev", story_id="1-1-example", story_file=story_file)
+    review_prompt = build_step_prompt("review", story_id="1-1-example", story_file=story_file)
+
+    assert dev_prompt.startswith(f"/bmad-dev-story {story_file}")
+    assert (
+        "- Do NOT use HALT, do NOT ask for manual verification, do NOT wait for responses"
+        in dev_prompt
     )
-    assert build_step_prompt("review", story_id="1-1-example", story_file=story_file).startswith(
-        f"/bmad-code-review {story_file}"
+    assert (
+        "skip the verification and mark it as done with a note that manual verification is deferred"
+        in dev_prompt
     )
+    assert "- Make all decisions autonomously — prefer the safest reasonable choice" in dev_prompt
+    assert "write a short explanation to the file _imp/HALT and then exit." in dev_prompt
+
+    assert review_prompt.startswith(f"/bmad-code-review {story_file}")
+    assert (
+        "- Defer all decision-needed findings (log them in the story file with [Review][Defer])"
+        in review_prompt
+    )
+    assert "write a short explanation to the file _imp/HALT and then exit." in review_prompt
 
 
 def test_resolve_step_runtime_uses_configured_model_and_effort():

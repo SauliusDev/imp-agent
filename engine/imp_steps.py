@@ -62,7 +62,7 @@ PREAMBLE_SPEC = (
     "\n## AUTONOMOUS PIPELINE MODE\n"
     "You are running inside an automated pipeline with no human present.\n"
     "Complete the story spec without halting for user input:\n"
-    "- Do NOT use HALT or ask for clarification - make reasonable assumptions\n"
+    "- Do NOT use HALT or ask for clarification — make reasonable assumptions\n"
     "- Do NOT present menus or wait for responses\n"
     "- Complete the full spec and write the story file as per your normal workflow"
     + _HALT_SIGNAL
@@ -75,7 +75,7 @@ PREAMBLE_DEV = (
     "- Do NOT use HALT, do NOT ask for manual verification, do NOT wait for responses\n"
     "- If a task requires manual action (e.g. pressing F5, opening a browser), "
     "skip the verification and mark it as done with a note that manual verification is deferred\n"
-    "- Make all decisions autonomously - prefer the safest reasonable choice\n"
+    "- Make all decisions autonomously — prefer the safest reasonable choice\n"
     "- Complete all tasks and update the story file status as per your normal workflow"
     + _HALT_SIGNAL
 )
