@@ -1311,6 +1311,29 @@ def _pipeline_thread(state: RunnerState, session: SessionLogger) -> None:
         state.request_exit(1)
 
 
+def _start_usage_poller(state: RunnerState, session: SessionLogger) -> None:
+    """Start the provider-specific usage poller, if configured."""
+    if _is_claude_provider(state.config):
+        usage_t = threading.Thread(
+            target=_usage_poller_thread,
+            args=(state,),
+            daemon=True,
+            name="usage-poller",
+        )
+        usage_t.start()
+    elif _codex_usage_enabled(state.config):
+        usage_t = threading.Thread(
+            target=_codex_usage_poller_thread,
+            args=(state,),
+            daemon=True,
+            name="codex-usage-poller",
+        )
+        usage_t.start()
+        session.log(f"Codex usage poller enabled ({_codex_usage_source(state.config)})")
+    else:
+        session.log("Usage poller disabled for Codex provider")
+
+
 def _make_quit_now(state: RunnerState, session: SessionLogger):
     """Return a callback that kills the subprocess and requests exit."""
 
@@ -1364,6 +1387,22 @@ def main() -> None:
         action="store_true",
         help="Enable verbose output",
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Start local web API instead of Rich TUI",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Web API bind host",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Web API bind port",
+    )
     args = parser.parse_args()
 
     # Load config and verify ledger exists
@@ -1399,6 +1438,67 @@ def main() -> None:
         state.reload_config(fresh)
         session.log("Config reloaded by user (r key)")
 
+    if args.web:
+        _start_usage_poller(state, session)
+        pipeline_t = None
+        pipeline_lock = threading.Lock()
+        pipeline_started = False
+
+        def start_run_once() -> None:
+            nonlocal pipeline_t, pipeline_started
+            with pipeline_lock:
+                if pipeline_started:
+                    session.log("Web run requested while pipeline already started")
+                    return
+                pipeline_started = True
+                state.confirm_launch()
+                session.log("Web run requested — starting pipeline")
+                pipeline_t = threading.Thread(
+                    target=_pipeline_thread,
+                    args=(state, session),
+                    daemon=True,
+                    name="pipeline",
+                )
+                pipeline_t.start()
+
+        try:
+            from imp_server import create_app
+            import uvicorn
+        except ImportError as exc:
+            session.close()
+            print(
+                "IMP web API requires optional dependencies: fastapi and uvicorn. "
+                "Install them with: python3 -m pip install fastapi uvicorn",
+                file=sys.stderr,
+            )
+            print(f"Missing dependency: {exc.name}", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            app = create_app(
+                state,
+                start_run=start_run_once,
+                pause=state.set_paused,
+                resume=state.clear_paused,
+                quit_now=quit_now,
+                reload_config=reload_config_now,
+            )
+        except RuntimeError as exc:
+            session.close()
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            uvicorn.run(app, host=args.host, port=args.port)
+        except KeyboardInterrupt:
+            quit_now()
+
+        session.log(f"Exiting with code {state.exit_code}")
+        session.close()
+        if pipeline_t is not None:
+            pipeline_t.join(timeout=5.0)
+        sys.exit(state.exit_code)
+
     # Start keypress reader (daemon) — active during preflight too
     key_t = threading.Thread(
         target=start_keyreader,
@@ -1409,25 +1509,7 @@ def main() -> None:
     key_t.start()
 
     # Start provider-specific usage poller.
-    if _is_claude_provider(state.config):
-        usage_t = threading.Thread(
-            target=_usage_poller_thread,
-            args=(state,),
-            daemon=True,
-            name="usage-poller",
-        )
-        usage_t.start()
-    elif _codex_usage_enabled(state.config):
-        usage_t = threading.Thread(
-            target=_codex_usage_poller_thread,
-            args=(state,),
-            daemon=True,
-            name="codex-usage-poller",
-        )
-        usage_t.start()
-        session.log(f"Codex usage poller enabled ({_codex_usage_source(state.config)})")
-    else:
-        session.log("Usage poller disabled for Codex provider")
+    _start_usage_poller(state, session)
 
     # Main thread: display loop
     pipeline_t = None

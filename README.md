@@ -45,6 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/SauliusDev/imp-agent/main/setup.sh 
 - **Python 3.10+**
 - **Claude Code CLI** (`claude` on PATH) or **Codex CLI** (`codex` on PATH)
 - **`rich`** Python package (installer offers to install it)
+- Optional web UI/API: **`fastapi`** and **`uvicorn`**
 
 ## What gets installed
 
