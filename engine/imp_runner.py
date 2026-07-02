@@ -5,7 +5,7 @@ Usage: python3 _imp/imp_runner.py [epic-id|all] [--verbose]
 """
 from __future__ import annotations
 
-import argparse, asyncio, importlib.util, json, os, signal  # noqa: E401
+import argparse, asyncio, importlib.util, json, os, shlex, signal  # noqa: E401
 import subprocess, sys, threading, time  # noqa: E401
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -18,6 +18,14 @@ from imp_state import RunnerState, StepRecord, CurrentStep, create_initial_state
 from imp_keys import start_keyreader  # noqa: E402
 from imp_usage import read_usage_cache, check_threshold, is_stale, fetch_full_usage  # noqa: E402
 from imp_codex_usage import fetch_codex_usage  # noqa: E402
+from imp_steps import build_step_prompt, resolve_step_runtime  # noqa: E402
+from imp_tmux import (  # noqa: E402
+    build_session_name,
+    capture_output,
+    kill_session,
+    session_status,
+    spawn_session,
+)
 
 try:
     from imp_display import build_layout  # noqa: E402
@@ -659,6 +667,82 @@ async def run_claude_subprocess(
     )
 
 
+async def run_agent_tmux(
+    args: list[str],
+    jsonl_log_path: str,
+    readable_log_path: str,
+    state: RunnerState,
+    provider: str,
+    tmux_session: str,
+    poll_interval: float = 0.5,
+) -> int:
+    """Run an agent command in a tmux-backed child session and mirror raw output."""
+    os.makedirs(os.path.dirname(jsonl_log_path), exist_ok=True)
+    os.makedirs(os.path.dirname(readable_log_path), exist_ok=True)
+
+    command = " ".join(shlex.quote(arg) for arg in args)
+    spawn_session(tmux_session, command, provider, PROJECT_ROOT)
+
+    mirrored_len = 0
+    pending = ""
+
+    with (
+        open(jsonl_log_path, "w", encoding="utf-8") as raw_f,
+        open(readable_log_path, "w", encoding="utf-8") as readable_f,
+    ):
+        def mirror_new_output() -> None:
+            nonlocal mirrored_len, pending
+            captured = capture_output(tmux_session, PROJECT_ROOT)
+            if len(captured) < mirrored_len:
+                mirrored_len = 0
+                pending = ""
+            new_text = captured[mirrored_len:]
+            mirrored_len = len(captured)
+            if not new_text:
+                return
+
+            raw_f.write(new_text)
+            raw_f.flush()
+            readable_f.write(new_text)
+            readable_f.flush()
+
+            pending += new_text
+            while "\n" in pending:
+                line, pending = pending.split("\n", 1)
+                if line.strip():
+                    state.append_output(line.rstrip())
+
+        while True:
+            status = session_status(tmux_session, PROJECT_ROOT)
+            mirror_new_output()
+            session_state = status.get("session_state")
+            if session_state != "running":
+                if pending.strip():
+                    state.append_output(pending.rstrip())
+                    pending = ""
+                return _tmux_exit_code(status)
+            await asyncio.sleep(poll_interval)
+
+
+def _tmux_exit_code(status: dict) -> int:
+    session_state = status.get("session_state")
+    if session_state == "completed":
+        return 0
+    if session_state == "killed":
+        return _coerce_exit_code(status.get("exit_code"), 143)
+    if session_state == "crashed":
+        return _coerce_exit_code(status.get("exit_code"), 1)
+    return _coerce_exit_code(status.get("exit_code"), 1)
+
+
+def _coerce_exit_code(value, default: int) -> int:
+    try:
+        code = int(value)
+    except (TypeError, ValueError):
+        return default
+    return code if code != 0 or default == 0 else default
+
+
 # -- Step runners --
 
 def _build_log_paths(story_id: str, step: str, attempt: int) -> tuple[str, str]:
@@ -678,7 +762,7 @@ def _get_step_chain(epic_id: str) -> str:
 
 def _begin_step(
     state: RunnerState, story_id: str, step: str,
-    attempt: int, max_attempts: int,
+    attempt: int, max_attempts: int, tmux_session: str | None = None,
 ) -> None:
     """Set current step on state and clear output buffer."""
     state.set_current(CurrentStep(
@@ -687,6 +771,7 @@ def _begin_step(
         step_chain=_get_step_chain(state.epic_id),
         start_time=time.time(),
         log_path=os.path.join(LOG_DIR, story_id, f"{step}-attempt-{attempt}.log"),
+        tmux_session=tmux_session,
     ))
     state.clear_output()
     if str(state.config.get("output_on_step_start", "true")).lower() in ("true", "1", "yes"):
@@ -772,25 +857,21 @@ async def _run_spec(
         imp_ledger.cmd_step_done(story_id, "spec")
         return
 
-    prompt = (
-        f"/bmad-create-story {story_id}\n\n"
-        f"IMPORTANT: The story file MUST be written to exactly this path: `{story_file}`\n"
-        + PREAMBLE_SPEC
-    )
+    prompt = build_step_prompt("spec", story_id=story_id, story_file=story_file)
 
     imp_ledger.cmd_step_attempt(story_id, "spec")
     attempt_num = ledger_get_attempts(story_id, "spec")
-    _begin_step(state, story_id, "spec", attempt_num, 0)
+    tmux_session = build_session_name(session.session_id, story_id, "spec")
+    _begin_step(state, story_id, "spec", attempt_num, 0, tmux_session)
 
     jsonl_path, readable_path = _build_log_paths(story_id, "spec", attempt_num)
     rel_log = os.path.relpath(jsonl_path, SCRIPT_DIR)
     session.log(f"{story_id}/spec: attempt {attempt_num} starting  →  {rel_log}")
 
     start = time.time()
-    await run_agent_subprocess(
+    await run_agent_tmux(
         _build_agent_args(provider, prompt, model, effort),
-        jsonl_path, readable_path, state, _build_stream_parser(provider),
-        stderr_to_readable=(provider == AGENT_PROVIDER_CODEX),
+        jsonl_path, readable_path, state, provider, tmux_session,
     )
     elapsed = time.time() - start
     state.clear_current()
@@ -819,19 +900,19 @@ async def _run_dev(
     """Run the dev step for a story."""
     imp_ledger.cmd_step_attempt(story_id, "dev")
     attempt_num = ledger_get_attempts(story_id, "dev")
-    _begin_step(state, story_id, "dev", attempt_num, 0)
+    tmux_session = build_session_name(session.session_id, story_id, "dev")
+    _begin_step(state, story_id, "dev", attempt_num, 0, tmux_session)
 
     jsonl_path, readable_path = _build_log_paths(story_id, "dev", attempt_num)
     rel_log = os.path.relpath(jsonl_path, SCRIPT_DIR)
     session.log(f"{story_id}/dev: attempt {attempt_num} starting  →  {rel_log}")
 
-    prompt = f"/bmad-dev-story {story_file}\n{PREAMBLE_DEV}"
+    prompt = build_step_prompt("dev", story_id=story_id, story_file=story_file)
 
     start = time.time()
-    exit_code = await run_agent_subprocess(
+    exit_code = await run_agent_tmux(
         _build_agent_args(provider, prompt, model, effort),
-        jsonl_path, readable_path, state, _build_stream_parser(provider),
-        stderr_to_readable=(provider == AGENT_PROVIDER_CODEX),
+        jsonl_path, readable_path, state, provider, tmux_session,
     )
     elapsed = time.time() - start
     state.clear_current()
@@ -871,19 +952,19 @@ async def _run_review(
 
     imp_ledger.cmd_step_attempt(story_id, "review")
     attempt_num = ledger_get_attempts(story_id, "review")
-    _begin_step(state, story_id, "review", attempt_num, max_review)
+    tmux_session = build_session_name(session.session_id, story_id, "review")
+    _begin_step(state, story_id, "review", attempt_num, max_review, tmux_session)
 
     jsonl_path, readable_path = _build_log_paths(story_id, "review", attempt_num)
     rel_log = os.path.relpath(jsonl_path, SCRIPT_DIR)
     session.log(f"{story_id}/review: attempt {attempt_num}/{max_review} starting  →  {rel_log}")
 
-    prompt = f"/bmad-code-review {story_file}\n{PREAMBLE_REVIEW}"
+    prompt = build_step_prompt("review", story_id=story_id, story_file=story_file)
 
     start = time.time()
-    exit_code = await run_agent_subprocess(
+    exit_code = await run_agent_tmux(
         _build_agent_args(provider, prompt, model, effort),
-        jsonl_path, readable_path, state, _build_stream_parser(provider),
-        stderr_to_readable=(provider == AGENT_PROVIDER_CODEX),
+        jsonl_path, readable_path, state, provider, tmux_session,
     )
     elapsed = time.time() - start
     state.clear_current()
@@ -1175,12 +1256,9 @@ async def pipeline_main(state: RunnerState, session: SessionLogger) -> None:
         # Re-read config fresh after possible reload — affects next step's model/effort
         cfg = state.config
         provider = _normalize_agent_provider(cfg.get("agent_provider"))
-        model_spec = str(cfg.get("model_spec", "claude-sonnet-4-6"))
-        effort_spec = str(cfg.get("effort_spec", "medium"))
-        model_dev = str(cfg.get("model_dev", "claude-sonnet-4-6"))
-        effort_dev = str(cfg.get("effort_dev", "high"))
-        model_review = str(cfg.get("model_review", "claude-opus-4-6"))
-        effort_review = str(cfg.get("effort_review", "high"))
+        spec_runtime = resolve_step_runtime("spec", cfg)
+        dev_runtime = resolve_step_runtime("dev", cfg)
+        review_runtime = resolve_step_runtime("review", cfg)
         max_review = int(cfg.get("max_review_attempts", 3))
         artifacts_dir = str(cfg.get("artifacts_dir", "_bmad-output/implementation-artifacts"))
 
@@ -1190,19 +1268,19 @@ async def pipeline_main(state: RunnerState, session: SessionLogger) -> None:
         if step == "spec":
             await _run_spec(
                 state, session, story_id, story_file,
-                model_spec, effort_spec, provider,
+                spec_runtime.model, spec_runtime.effort, spec_runtime.provider,
             )
 
         elif step == "dev":
             await _run_dev(
                 state, session, story_id, story_file,
-                model_dev, effort_dev, provider,
+                dev_runtime.model, dev_runtime.effort, dev_runtime.provider,
             )
 
         elif step == "review":
             await _run_review(
                 state, session, story_id, story_file,
-                model_review, effort_review, max_review, provider,
+                review_runtime.model, review_runtime.effort, max_review, review_runtime.provider,
             )
             # If story is fully done (removed from pending), flag for pause_after check
             if story_id not in state.pending_stories:
@@ -1238,21 +1316,28 @@ def _make_quit_now(state: RunnerState, session: SessionLogger):
 
     def quit_now() -> None:
         session.log("Quit-now triggered")
-        pid = state.subprocess_pid
-        if pid is not None:
-            try:
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, signal.SIGTERM)
-                # Give the process group a moment to exit cleanly
-                time.sleep(0.3)
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                except OSError:
-                    pass  # Already gone — that's fine
-            except OSError:
-                pass
-        # Roll back current step if in progress
         current = state.current
+        tmux_session = current.tmux_session if current is not None else None
+        if tmux_session:
+            try:
+                kill_session(tmux_session, PROJECT_ROOT)
+            except Exception:
+                pass
+        else:
+            pid = state.subprocess_pid
+            if pid is not None:
+                try:
+                    pgid = os.getpgid(pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                    # Give the process group a moment to exit cleanly
+                    time.sleep(0.3)
+                    try:
+                        os.killpg(pgid, signal.SIGKILL)
+                    except OSError:
+                        pass  # Already gone — that's fine
+                except OSError:
+                    pass
+        # Roll back current step if in progress
         if current is not None:
             try:
                 imp_ledger.cmd_step_interrupted(current.story_id, current.step)

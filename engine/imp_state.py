@@ -32,6 +32,7 @@ class CurrentStep:
     step_chain: str  # e.g. "spec✓ dev(×2)·---"
     start_time: float  # time.time()
     log_path: str
+    tmux_session: Optional[str] = None
 
 
 class RunnerState:
