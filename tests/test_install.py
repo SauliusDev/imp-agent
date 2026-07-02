@@ -7,6 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "engine"))
 
+import install
 from install import (
     install_config,
     install_engine,
@@ -37,12 +38,20 @@ def test_install_engine_fresh(tmp_path):
 
 def test_install_engine_copies_web_dist_when_source_dist_exists(tmp_path):
     source_dist = Path(__file__).parent.parent / "web" / "dist"
-    if not source_dist.exists():
-        pytest.skip("source web/dist is not built")
+    assert source_dist.exists()
 
     install_engine(tmp_path)
 
     assert (tmp_path / "_imp" / "web" / "dist" / "index.html").exists()
+    assert (tmp_path / "_imp" / "web" / "dist" / "assets").is_dir()
+
+
+def test_install_engine_fails_when_bundled_web_dist_is_missing(tmp_path, monkeypatch):
+    missing_dist = tmp_path / "missing-web-dist"
+    monkeypatch.setattr(install, "WEB_DIST_DIR", missing_dist)
+
+    with pytest.raises(RuntimeError, match="Bundled web assets are missing.*web/dist"):
+        install_engine(tmp_path)
 
 
 def test_install_engine_imp_sh_is_executable(tmp_path):

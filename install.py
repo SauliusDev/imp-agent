@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 SCRIPT_DIR = Path(__file__).parent
+WEB_DIST_DIR = SCRIPT_DIR / "web" / "dist"
 console = Console()
 
 PROJECT_MARKERS = ["package.json", "pyproject.toml", "go.mod", "Cargo.toml"]
@@ -18,6 +19,12 @@ PROJECT_MARKERS = ["package.json", "pyproject.toml", "go.mod", "Cargo.toml"]
 
 def install_engine(project_dir: Path) -> tuple[int, bool]:
     """Copy engine/ and built web assets → _imp/. Returns (file_count, was_update)."""
+    if not WEB_DIST_DIR.is_dir():
+        raise RuntimeError(
+            f"Bundled web assets are missing: {WEB_DIST_DIR}. "
+            "Build and commit web/dist before packaging a release."
+        )
+
     imp_dir = project_dir / "_imp"
     was_update = imp_dir.exists()
     imp_dir.mkdir(exist_ok=True)
@@ -29,12 +36,10 @@ def install_engine(project_dir: Path) -> tuple[int, bool]:
             shutil.copy2(src, imp_dir / src.name)
             count += 1
 
-    web_dist = SCRIPT_DIR / "web" / "dist"
-    if web_dist.exists():
-        web_dest = imp_dir / "web" / "dist"
-        if web_dest.exists():
-            shutil.rmtree(web_dest)
-        shutil.copytree(web_dist, web_dest)
+    web_dest = imp_dir / "web" / "dist"
+    if web_dest.exists():
+        shutil.rmtree(web_dest)
+    shutil.copytree(WEB_DIST_DIR, web_dest)
 
     (imp_dir / "imp.sh").chmod(0o755)
     return count, was_update

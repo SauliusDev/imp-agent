@@ -51,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/SauliusDev/imp-agent/main/setup.sh 
 
 | Path | Description |
 |---|---|
-| `_imp/` | IMP engine (7 Python files + shell launcher) |
+| `_imp/` | IMP engine, shell launcher, and bundled web UI assets in `_imp/web/dist` |
 | `.claude/skills/imp-init/` | Skill to initialize the ledger (Claude) |
 | `.agents/skills/imp-init/` | Skill to initialize the ledger (Codex) |
 | `_imp/config.yaml` | Pipeline config — edit before first run |
