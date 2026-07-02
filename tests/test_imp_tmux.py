@@ -1,3 +1,4 @@
+import json
 import stat
 import subprocess
 import sys
@@ -71,6 +72,43 @@ def test_spawn_session_writes_state_command_output_and_runner(monkeypatch, tmp_p
     assert stat.S_IMODE(paths.state.stat().st_mode) == 0o600
     assert calls[0][0][:3] == ["tmux", "new-session", "-d"]
     assert calls[0][0][-1] == str(paths.runner)
+
+
+def test_kill_session_records_killed_result_and_exit_code(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("imp_tmux.command_exists", lambda name: True)
+    monkeypatch.setattr("imp_tmux.subprocess.run", fake_run)
+
+    paths = session_paths("imp-test", tmp_path)
+    paths.state.parent.mkdir(parents=True, exist_ok=True)
+    paths.state.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "session": "imp-test",
+                "lifecycle": "running",
+                "result": "",
+                "exitCode": "",
+                "failureReason": "",
+                "updatedAt": "2026-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    kill_session("imp-test", tmp_path)
+
+    state = load_state(paths.state)
+    assert state["lifecycle"] == "finished"
+    assert state["result"] == "killed"
+    assert state["failureReason"] == "killed by operator"
+    assert state["exitCode"] == 143
+    assert calls[0][0] == ["tmux", "kill-session", "-t", "imp-test"]
 
 
 @pytest.mark.skipif(not command_exists("tmux"), reason="tmux not installed")

@@ -146,6 +146,7 @@ def kill_session(session: str, project_root: str | Path) -> None:
         state = load_state(paths.state)
         state["lifecycle"] = "finished"
         state["result"] = "killed"
+        state["exitCode"] = 143
         state["failureReason"] = "killed by operator"
         state["updatedAt"] = iso_now()
         _write_state(paths.state, state)
