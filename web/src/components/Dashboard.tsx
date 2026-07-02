@@ -1,4 +1,4 @@
-import impIcon from "../../../_board/icon/imp-agent.png";
+import impIcon from "../assets/imp-agent.png";
 import { Controls } from "./Controls";
 import { OutputPanel } from "./OutputPanel";
 import { Roadmap } from "./Roadmap";

@@ -1,6 +1,6 @@
 import type { ControlAction, ImpState } from "./types";
 
-const API_BASE = import.meta.env.VITE_IMP_API_BASE ?? "http://127.0.0.1:8765";
+const API_BASE = import.meta.env.VITE_IMP_API_BASE ?? "";
 
 export async function fetchState(): Promise<ImpState> {
   const response = await fetch(`${API_BASE}/api/state`);
