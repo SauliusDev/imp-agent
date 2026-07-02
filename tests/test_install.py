@@ -26,10 +26,11 @@ from imp_state import create_initial_state
 
 def test_install_engine_fresh(tmp_path):
     count, was_update = install_engine(tmp_path)
-    assert count == 10
+    assert count == 11
     assert was_update is False
     assert (tmp_path / "_imp" / "imp.sh").exists()
     assert (tmp_path / "_imp" / "imp_runner.py").exists()
+    assert (tmp_path / "_imp" / "imp_server.py").exists()
 
 
 def test_install_engine_imp_sh_is_executable(tmp_path):
