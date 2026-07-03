@@ -1438,6 +1438,11 @@ def main() -> None:
         help="Start local web API instead of Rich TUI",
     )
     parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Serve a dry-run web demo without requiring a ledger or launching agents",
+    )
+    parser.add_argument(
         "--host",
         default="127.0.0.1",
         help="Web API bind host",
@@ -1460,6 +1465,46 @@ def main() -> None:
         if host_error is not None:
             print(host_error, file=sys.stderr)
             sys.exit(2)
+
+    if args.demo and not args.web:
+        print("--demo is only supported with --web")
+        sys.exit(2)
+
+    if args.demo:
+        try:
+            from imp_demo import create_demo_callbacks, create_demo_state
+            from imp_server import create_app
+            import uvicorn
+        except ImportError as exc:
+            print(
+                "IMP demo web API requires optional dependencies: fastapi and uvicorn. "
+                "Install them with: python3 -m pip install fastapi uvicorn",
+                file=sys.stderr,
+            )
+            print(f"Missing dependency: {exc.name}", file=sys.stderr)
+            sys.exit(1)
+
+        state = create_demo_state(args.epic_id)
+        callbacks = create_demo_callbacks(state)
+        server = None
+
+        def shutdown_server() -> None:
+            if server is not None:
+                server.should_exit = True
+
+        app = create_app(
+            state,
+            start_run=callbacks.start_run,
+            pause=callbacks.pause,
+            resume=callbacks.resume,
+            quit_now=callbacks.quit_now,
+            reload_config=callbacks.reload_config,
+            shutdown_server=shutdown_server,
+        )
+        config = uvicorn.Config(app, host=args.host, port=args.port)
+        server = uvicorn.Server(config)
+        server.run()
+        sys.exit(state.exit_code)
 
     # Load config and verify ledger exists
     config = imp_ledger.CONFIG

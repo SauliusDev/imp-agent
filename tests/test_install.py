@@ -29,11 +29,13 @@ from imp_state import create_initial_state
 
 def test_install_engine_fresh(tmp_path):
     count, was_update = install_engine(tmp_path)
-    assert count == 11
+    assert count == 12
     assert was_update is False
     assert (tmp_path / "_imp" / "imp.sh").exists()
     assert (tmp_path / "_imp" / "imp_runner.py").exists()
     assert (tmp_path / "_imp" / "imp_server.py").exists()
+    assert (tmp_path / "_imp" / "imp_demo.py").exists()
+    assert (tmp_path / "_imp" / "demo" / "ledger.json").exists()
 
 
 def test_install_engine_copies_web_dist_when_source_dist_exists(tmp_path):

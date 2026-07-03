@@ -4,7 +4,10 @@ export function OutputPanel({ lines }: { lines: string[] }) {
   return (
     <section className="panel output-panel">
       <div className="panel-title">
-        <h2>Agent Output</h2>
+        <div>
+          <span className="panel-kicker">Stream</span>
+          <h2>Agent Output</h2>
+        </div>
         <span>{lines.length} lines</span>
       </div>
       <pre>{content}</pre>

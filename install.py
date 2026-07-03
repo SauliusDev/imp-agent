@@ -12,6 +12,7 @@ from rich.table import Table
 
 SCRIPT_DIR = Path(__file__).parent
 WEB_DIST_DIR = SCRIPT_DIR / "web" / "dist"
+DEMO_DIR = SCRIPT_DIR / "_imp" / "demo"
 console = Console()
 
 PROJECT_MARKERS = ["package.json", "pyproject.toml", "go.mod", "Cargo.toml"]
@@ -40,6 +41,11 @@ def install_engine(project_dir: Path) -> tuple[int, bool]:
     if web_dest.exists():
         shutil.rmtree(web_dest)
     shutil.copytree(WEB_DIST_DIR, web_dest)
+
+    demo_dest = imp_dir / "demo"
+    if demo_dest.exists():
+        shutil.rmtree(demo_dest)
+    shutil.copytree(DEMO_DIR, demo_dest)
 
     (imp_dir / "imp.sh").chmod(0o755)
     return count, was_update

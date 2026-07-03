@@ -1,0 +1,74 @@
+{
+  "project": "IMP Agent Demo",
+  "global_status": "in-progress",
+  "config": {
+    "agent_provider": "codex"
+  },
+  "epics": [
+    {
+      "id": "epic-1",
+      "title": "Local runner foundation",
+      "status": "in-progress",
+      "stories": [
+        {
+          "id": "1-1-ledger-bootstrap",
+          "title": "Create ledger from sprint plan",
+          "status": "done",
+          "steps": {
+            "spec": { "status": "done" },
+            "dev": { "status": "done" },
+            "review": { "status": "done" }
+          }
+        },
+        {
+          "id": "1-2-tmux-runner",
+          "title": "Run agent steps inside tmux",
+          "status": "in-progress",
+          "steps": {
+            "spec": { "status": "done" },
+            "dev": { "status": "in-progress" },
+            "review": { "status": "pending" }
+          }
+        },
+        {
+          "id": "1-3-web-dashboard",
+          "title": "Preview runner state in browser",
+          "status": "pending",
+          "steps": {
+            "spec": { "status": "pending" },
+            "dev": { "status": "pending" },
+            "review": { "status": "pending" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "epic-2",
+      "title": "Workflow graph controls",
+      "status": "pending",
+      "stories": [
+        {
+          "id": "2-1-human-breakpoints",
+          "title": "Pause at human approval nodes",
+          "status": "pending",
+          "steps": {
+            "spec": { "status": "pending" },
+            "dev": { "status": "pending" },
+            "review": { "status": "pending" }
+          }
+        },
+        {
+          "id": "2-2-agent-tags",
+          "title": "Map custom tags to agent skills",
+          "status": "blocked",
+          "blocked_reason": "Waiting for workflow.mmd tag format",
+          "steps": {
+            "spec": { "status": "pending" },
+            "dev": { "status": "pending" },
+            "review": { "status": "pending" }
+          }
+        }
+      ]
+    }
+  ]
+}

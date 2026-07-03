@@ -1,3 +1,4 @@
+import { Activity, Gauge, GitBranch, Radio } from "lucide-react";
 import impIcon from "../assets/imp-agent.png";
 import { Controls } from "./Controls";
 import { OutputPanel } from "./OutputPanel";
@@ -26,28 +27,52 @@ export function Dashboard({
   apiError: string | null;
 }) {
   const current = state.current;
+  const completedRows = state.roadmap_rows.filter(([, , status]) => status === "done" || status === "done-session").length;
+  const blockedRows = state.roadmap_rows.filter(([, , status]) => status === "blocked" || status === "failed").length;
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <img src={impIcon} alt="" className="brand-icon" />
-        <div className="headline">
-          <h1>IMP Agent</h1>
-          <p>
-            <span>{state.provider}</span>
-            <span>{state.epic_id || "no epic loaded"}</span>
-            <span>{state.app_phase}</span>
-          </p>
-        </div>
-        <div className="usage" aria-label="Usage">
-          <span>5h {formatPct(state.usage.five_hour_pct)}</span>
-          <span>7d {formatPct(state.usage.seven_day_pct)}</span>
-          <span>Snt {formatPct(state.usage.sonnet_pct)}</span>
-          <span>{state.usage.decision ?? "PROCEED"}</span>
-        </div>
-      </header>
-
-      <Controls running={Boolean(current)} paused={state.app_phase === "paused"} />
+      <section className="command-header">
+        <header className="topbar">
+          <div className="brand-group">
+            <div className="brand-mark">
+              <img src={impIcon} alt="" className="brand-icon" />
+            </div>
+            <div className="headline" aria-label="Runner summary">
+              <span className="eyebrow">Local cockpit</span>
+              <h1>IMP Agent</h1>
+              <div className="headline-meta">
+                <span>{state.provider}</span>
+                <span>{state.epic_id || "no epic loaded"}</span>
+                <span>{state.app_phase}</span>
+              </div>
+            </div>
+          </div>
+          <Controls running={Boolean(current)} paused={state.app_phase === "paused"} />
+          <div className="usage-grid" aria-label="Usage">
+            <div className="metric-card">
+              <Gauge size={15} aria-hidden="true" />
+              <span>5h</span>
+              <strong>{formatPct(state.usage.five_hour_pct)}</strong>
+            </div>
+            <div className="metric-card">
+              <Activity size={15} aria-hidden="true" />
+              <span>7d</span>
+              <strong>{formatPct(state.usage.seven_day_pct)}</strong>
+            </div>
+            <div className="metric-card">
+              <Radio size={15} aria-hidden="true" />
+              <span>Snt</span>
+              <strong>{formatPct(state.usage.sonnet_pct)}</strong>
+            </div>
+            <div className="metric-card decision">
+              <GitBranch size={15} aria-hidden="true" />
+              <span>Gate</span>
+              <strong>{state.usage.decision ?? "PROCEED"}</strong>
+            </div>
+          </div>
+        </header>
+      </section>
 
       {apiError ? <div className="notice">{apiError}</div> : null}
       {state.halted ? <div className="notice danger">{state.halt_reason ?? "Pipeline halted"}</div> : null}
@@ -57,7 +82,10 @@ export function Dashboard({
 
         <section className="panel current-panel">
           <div className="panel-title">
-            <h2>Current Step</h2>
+            <div>
+              <span className="panel-kicker">Execution</span>
+              <h2>Current Step</h2>
+            </div>
             <span className="status-pill">{streamStatus}</span>
           </div>
           {current ? (
@@ -78,8 +106,25 @@ export function Dashboard({
               <dd>{current.log_path}</dd>
             </dl>
           ) : (
-            <p className="muted">Idle. Start the run when the server is ready.</p>
+            <div className="idle-card">
+              <span>Ready</span>
+              <p>Start the run when the server is ready.</p>
+            </div>
           )}
+          <div className="run-summary" aria-label="Roadmap summary">
+            <div>
+              <span>{state.pending_stories.length}</span>
+              <small>pending</small>
+            </div>
+            <div>
+              <span>{completedRows}</span>
+              <small>done</small>
+            </div>
+            <div>
+              <span>{blockedRows}</span>
+              <small>blocked</small>
+            </div>
+          </div>
         </section>
 
         <OutputPanel lines={state.output_lines} />
